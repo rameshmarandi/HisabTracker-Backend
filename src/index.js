@@ -13,7 +13,7 @@ connectDB()
   .then(async () => {
     console.log(`✅ 🚦📡 Server is running on port 🚀 ${ENV.PORT}`);
     const server = http.createServer(app); // Create HTTP server
-    initializeSocket(server); // Initialize Socket.IO
+    // initializeSocket(server); // Initialize Socket.IO
     // ✅ 2. Wait a tick, then sync
     // setTimeout(async () => {
     //   await syncBusyStatusFromDb();

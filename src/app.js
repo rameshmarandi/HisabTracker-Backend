@@ -59,12 +59,22 @@ import payloadCrypto from "./services/payloadCryptoService.js";
 
 import rateLimit from "express-rate-limit";
 import { ENV } from "./utils/env.js";
+// Admin
+import appConfig from "./routers/Admin/AppConfig/appConfig.router.js";
+import adConfig from "./routers/Admin/AppConfig/adConfig.routes.js";
+
+// User
 import authRouter from "./routers/User/Auth/auth.routes.js";
+
 // startSchedulers();
 //
 //Declaration of routes
 
 app.use("/api/v1", encryptionRouter); // encryption || decryption
+
+//Admin
+app.use("/api/v1/config", appConfig);
+app.use("/api/v1/adConfig", adConfig);
 
 // User
 app.use("/api/v1/user", authRouter);
