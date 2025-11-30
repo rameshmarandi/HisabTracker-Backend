@@ -65,6 +65,7 @@ import adConfig from "./routers/Admin/AppConfig/adConfig.routes.js";
 
 // User
 import authRouter from "./routers/User/Auth/auth.routes.js";
+import syncRouter from "./routers/sync/sync.routes.js";
 
 // startSchedulers();
 //
@@ -78,6 +79,7 @@ app.use("/api/v1/adConfig", adConfig);
 
 // User
 app.use("/api/v1/user", authRouter);
+app.use("/api/v1/sync", syncRouter);
 
 app.use(requestLogger); // ✅ Logs all incoming requests
 // ✅ Global Error Handler (Logs only errors)
