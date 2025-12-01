@@ -1,6 +1,7 @@
 // import { Admin } from "../models/Admin/Auth/admin.model.js";
-import { User } from "../models/User/Auth/user.model.js";
-import { ApiError } from "../utils/ApiError.js";
+// import { User } from "../models/User/Auth/user.model.js";
+import { User } from "../../models/User/Auth/user.model.js";
+import { ApiError } from "../../utils/ApiError.js";
 
 const generateAccessTokenAndRefreshToken = async (userID) => {
   try {

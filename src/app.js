@@ -62,10 +62,13 @@ import { ENV } from "./utils/env.js";
 // Admin
 import appConfig from "./routers/Admin/AppConfig/appConfig.router.js";
 import adConfig from "./routers/Admin/AppConfig/adConfig.routes.js";
+import businessSetting from "./routers//Admin/BusinessSetting/businessSetting.routes.js";
+import subscriptionPlanRouter from "./routers/Admin/SubscriptionPlan/subscriptionPlan.router.js";
 
 // User
 import authRouter from "./routers/User/Auth/auth.routes.js";
 import syncRouter from "./routers/sync/sync.routes.js";
+import transactionRouter from "./routers/User/TransactionHistory/transactionHistory.router.js";
 
 // startSchedulers();
 //
@@ -74,12 +77,16 @@ import syncRouter from "./routers/sync/sync.routes.js";
 app.use("/api/v1", encryptionRouter); // encryption || decryption
 
 //Admin
-app.use("/api/v1/config", appConfig);
+app.use("/api/v1/appConfig", appConfig);
 app.use("/api/v1/adConfig", adConfig);
+
+app.use("/api/v1/setting", businessSetting);
+app.use("/api/v1/admin/subscription", subscriptionPlanRouter);
 
 // User
 app.use("/api/v1/user", authRouter);
 app.use("/api/v1/sync", syncRouter);
+app.use("/api/v1/transaction", transactionRouter);
 
 app.use(requestLogger); // ✅ Logs all incoming requests
 // ✅ Global Error Handler (Logs only errors)

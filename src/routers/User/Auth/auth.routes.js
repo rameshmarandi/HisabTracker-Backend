@@ -11,7 +11,7 @@ import {
   getCurrentUser,
   logoutUser,
   removeDevice,
-} from "../../../controllers/User/user.controller.js";
+} from "../../../controllers/User/Auth/user.controller.js";
 import { validateRequest } from "../../../middlewares/validation.middleware.js";
 import {
   loginSchema,

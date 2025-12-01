@@ -20,8 +20,8 @@ const router = Router();
 
 // GET CURRENT APP CONFIG
 router.get(
-  "/",
-  //   verifyUserJWT,
+  "/getAppConfig",
+  // verifyUserJWT,
   // verifyAdminRole, // 👈 will be enabled later
   circuitBreakerMiddleware(getAppConfig)
 );

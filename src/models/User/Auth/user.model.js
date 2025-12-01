@@ -1,3 +1,4 @@
+// models/user.model.js
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
@@ -8,12 +9,6 @@ import { ENV } from "../../../utils/env.js";
 // -------------------------------------------------------------
 // Device Schema
 // -------------------------------------------------------------
-// const deviceSchema = new mongoose.Schema({
-//   deviceId: { type: String },
-//   deviceName: { type: String },
-//   lastActive: { type: Number, default: Date.now() },
-//   lastSyncedAt: { type: Number, default: null },
-// });
 const deviceSchema = new mongoose.Schema({
   deviceId: { type: String, required: true },
   deviceName: { type: String, default: "Unknown Device" },
@@ -23,12 +18,13 @@ const deviceSchema = new mongoose.Schema({
 });
 
 // -------------------------------------------------------------
-// Wallet Schema
+// Wallet Schema (REAL DIGITAL CASH WALLET)
 // -------------------------------------------------------------
+
 const walletSchema = new mongoose.Schema({
-  referralPoints: { type: Number, default: 0 },
-  totalEarnedPoints: { type: Number, default: 0 },
-  totalUsedPoints: { type: Number, default: 0 },
+  balance: { type: Number, default: 0 }, // current usable balance
+  totalEarnedCash: { type: Number, default: 0 },
+  totalUsedCash: { type: Number, default: 0 },
 });
 
 // -------------------------------------------------------------
@@ -80,7 +76,7 @@ const UserSchema = new mongoose.Schema(
     },
 
     // ---------------- REFERRAL SYSTEM ----------------
-    referralCode: { type: String, unique: true },
+    referralCode: { type: String, unique: true }, // 6-digit numeric
     referredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -137,22 +133,34 @@ UserSchema.pre("save", async function (next) {
 });
 
 // -------------------------------------------------------------
+// Generate UNIQUE 6-Digit Referral Code per User
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+// Generate UNIQUE Referral Code => "HT" + 6 digits  (8 characters total)
+// -------------------------------------------------------------
+UserSchema.pre("save", async function (next) {
+  if (this.referralCode) return next(); // already exists? skip
+
+  let code;
+  let exists = true;
+
+  while (exists) {
+    const digits = Math.floor(100000 + Math.random() * 900000).toString();
+    code = "HT" + digits; // Always 8 chars: Example -> HT123456
+
+    exists = await this.constructor.exists({ referralCode: code });
+  }
+
+  this.referralCode = code;
+  next();
+});
+
+// -------------------------------------------------------------
 // Compare Password
 // -------------------------------------------------------------
 UserSchema.methods.comparePassword = async function (plainPassword) {
   return await bcrypt.compare(plainPassword, this.password);
 };
-
-// -------------------------------------------------------------
-// Referral Code Generation
-// -------------------------------------------------------------
-UserSchema.pre("save", function (next) {
-  if (!this.referralCode) {
-    this.referralCode =
-      "HT" + Math.random().toString(36).substr(2, 6).toUpperCase();
-  }
-  next();
-});
 
 // -------------------------------------------------------------
 // Generate Access Token

@@ -29,7 +29,7 @@ const router = Router();
 // Later add verifyAdmin middleware as well
 
 router.get(
-  "/",
+  "/getAdConfig",
   //  verifyUserJWT,
 
   circuitBreakerMiddleware(getAllAdConfigs)
