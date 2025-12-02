@@ -64,29 +64,35 @@ import appConfig from "./routers/Admin/AppConfig/appConfig.router.js";
 import adConfig from "./routers/Admin/AppConfig/adConfig.routes.js";
 import businessSetting from "./routers//Admin/BusinessSetting/businessSetting.routes.js";
 import subscriptionPlanRouter from "./routers/Admin/SubscriptionPlan/subscriptionPlan.router.js";
-
+import featureRouter from "./routers/Admin/Features/feature.router.js";
+import dashBoardRouter from "./routers/Admin/Dashboard/dashboard.router.js";
 // User
 import authRouter from "./routers/User/Auth/auth.routes.js";
 import syncRouter from "./routers/sync/sync.routes.js";
 import transactionRouter from "./routers/User/TransactionHistory/transactionHistory.router.js";
+import subscriptionPurchaseRouter from "./routers/User/Subscriptions/subscriptionPurchase.routes.js";
 
-// startSchedulers();
+//Schedular
+startSchedulers();
 //
 //Declaration of routes
 
 app.use("/api/v1", encryptionRouter); // encryption || decryption
 
 //Admin
-app.use("/api/v1/appConfig", appConfig);
-app.use("/api/v1/adConfig", adConfig);
+app.use("/api/v1/admin/appConfig", appConfig);
+app.use("/api/v1/admin/adConfig", adConfig);
 
-app.use("/api/v1/setting", businessSetting);
+app.use("/api/v1/admin/setting", businessSetting);
 app.use("/api/v1/admin/subscription", subscriptionPlanRouter);
+app.use("/api/v1/admin/feature", featureRouter);
+app.use("/api/v1/admin/dashboard", dashBoardRouter);
 
 // User
 app.use("/api/v1/user", authRouter);
 app.use("/api/v1/sync", syncRouter);
 app.use("/api/v1/transaction", transactionRouter);
+app.use("/api/v1/purchase", subscriptionPurchaseRouter);
 
 app.use(requestLogger); // ✅ Logs all incoming requests
 // ✅ Global Error Handler (Logs only errors)

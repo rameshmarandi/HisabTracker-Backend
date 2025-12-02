@@ -1,91 +1,109 @@
 import cron from "node-cron";
+import { User } from "../models/User/Auth/user.model.js";
+import { AppConfig } from "../models/Admin/AppConfig/appConfig.model.js";
 
-// import { sendEmailTemplate } from "./sendEmailTemplate.js";
-// import {
-//   syncOnlineStatusToDB,
-//   syncRedisToMongoDB,
-// } from "../services/syncRedisToMongoDB.js";
-// import { subscriptionExpiryJob } from "../controllers/User/ProFinderSubscription/profinderSubscription.controller.js";
-
-// SchedulerManager class to manage multiple schedulers
+// Cron Manager
 class SchedulerManager {
   constructor() {
     this.jobs = {};
   }
 
-  // Add a new job
   addJob(name, schedule, task) {
     if (this.jobs[name]) {
-      console.log(`Job ${name} already exists. Replacing it with the new one.`);
-      this.stopJob(name); // Stop the existing job if it exists
-    }
-
-    const job = cron.schedule(schedule, task);
-    this.jobs[name] = job;
-    console.log(`Job ${name} scheduled with cron expression: ${schedule}`);
-  }
-
-  // Stop a job
-  stopJob(name) {
-    if (this.jobs[name]) {
       this.jobs[name].stop();
-      console.log(`Job ${name} stopped.`);
-    } else {
-      console.log(`No job found with the name ${name}.`);
     }
-  }
 
-  // Start a job
-  startJob(name) {
-    if (this.jobs[name]) {
-      this.jobs[name].start();
-      console.log(`Job ${name} started.`);
-    } else {
-      console.log(`No job found with the name ${name}.`);
-    }
-  }
+    const job = cron.schedule(schedule, async () => {
+      console.log(`\n🚀 Running "${name}" - ${new Date().toLocaleString()}`);
 
-  // List all jobs
-  listJobs() {
-    return Object.keys(this.jobs);
+      try {
+        await task();
+        console.log(`✔ Job "${name}" done`);
+      } catch (error) {
+        console.error(`❌ ${name} error:`, error.message);
+      }
+    });
+
+    this.jobs[name] = job;
+    console.log(`🕒 Scheduled: ${name} → ${schedule}`);
   }
 }
 
-// Create a singleton instance of SchedulerManager
 const schedulerManager = new SchedulerManager();
 
-const startRedisSyncScheduler = () => {
-  // schedulerManager.addJob(
-  //   "syncRedisToMongoDB",
-  //   "*/30 * * * * *", // Runs every 30 seconds
-  //   async () => {
-  //     console.log("🔄 Syncing Redis data to MongoDB...");
-  //     await syncRedisToMongoDB();
-  //   }
+// 🚨 00:01 AM — Auto Expire Premium Subscribers
+schedulerManager.addJob("expireSubscriptions", "1 0 * * *", async () => {
+  const now = Date.now();
+  const config = await AppConfig.findOne({ key: "default" });
+  const free = config?.freeUserLimits || { maxDevices: 1 };
 
-  schedulerManager.addJob(
-    "syncRedisToMongoDB",
-    "*/30 * * * *", // Runs every 1 minute
-    async () => {
-      console.log("🔄 Syncing Redis data to MongoDB...");
-      // await syncRedisToMongoDB();
-      // await syncOnlineStatusToDB();
-    }
-  );
-  schedulerManager.addJob(
-    "subscriptionExpiryJob",
-    "1 0 * * *", // Runs daily at 00:01 AM
-    async () => {
-      console.log("⏰ Subscription Expiry Job Started...");
-      // await subscriptionExpiryJob();
-    }
-  );
-};
+  const expiredUsers = await User.find({
+    "currentSubscription.isPremium": true,
+    "currentSubscription.expiresAt": { $lte: now },
+  });
 
-// Export the function to start all schedulers
+  for (const user of expiredUsers) {
+    user.currentSubscription.isPremium = false;
+    user.currentSubscription.planId = null;
+    user.currentSubscription.planName = "Free Plan";
+    user.currentSubscription.features = {};
+    user.currentSubscription.maxDevicesAllowed = free.maxDevices ?? 1;
+
+    await user.save();
+
+    console.log(`🔻 Downgraded premium user: ${user._id}`);
+  }
+});
+
+// 🔔 10:00 AM — Reminder Notifications (6, 4 & 1 day before expiry)
+schedulerManager.addJob(
+  "subscriptionExpiryReminders",
+  // "0 10 * * *",
+
+  "0 2 * * *", // ⏰ Every day at 02:00 AM
+  async () => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayISO = todayStart.toISOString().split("T")[0];
+
+    const targetDates = [];
+    for (const daysLeft of [6, 4, 1]) {
+      const d = new Date(todayStart);
+      d.setDate(todayStart.getDate() + daysLeft);
+      targetDates.push(d.toISOString().split("T")[0]);
+    }
+
+    const users = await User.find({
+      "currentSubscription.isPremium": true,
+      "currentSubscription.expiresAt": {
+        $gte: todayStart.getTime(),
+      },
+    });
+
+    for (const u of users) {
+      const expiryDateISO = new Date(u.currentSubscription.expiresAt)
+        .toISOString()
+        .split("T")[0];
+
+      if (!targetDates.includes(expiryDateISO)) continue;
+
+      const daysRemaining = Math.ceil(
+        (u.currentSubscription.expiresAt - Date.now()) / (1000 * 60 * 60 * 24)
+      );
+
+      const message = `⚠️ Your premium will expire in ${daysRemaining} day(s). Renew now to continue premium features!`;
+
+      console.log(`📩 Reminder to ${u._id} → ${message}`);
+
+      // TODO: Enable once FCM is configured
+      // await sendPushNotification(u.firebaseToken, {
+      //   title: "Subscription Expiry!",
+      //   body: message,
+      // });
+    }
+  }
+);
+
 export const startSchedulers = () => {
-  // startPostScheduler(); // Start the daily verse publishing scheduler
-  // console.log("Schedulers started successfully.");
-  startRedisSyncScheduler();
-  // Add more scheduler starters below if needed
+  console.log("🚀 Subscription Schedulers Started");
 };

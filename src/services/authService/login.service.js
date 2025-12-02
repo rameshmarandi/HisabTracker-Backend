@@ -6,7 +6,7 @@ import { refreshPremiumStatus } from "../subscriptionService/refreshPremiumStatu
 import { generateAccessTokenAndRefreshToken } from "./tokenGenerateService.js";
 
 export const loginUserService = async ({ email, password, deviceId }) => {
-  // 1️⃣ Fetch user
+  // 1️⃣ Fetch user including password
   let user = await User.findOne({ email }).select("+password");
   if (!user) throw new ApiError(404, "User not found");
 
@@ -14,20 +14,21 @@ export const loginUserService = async ({ email, password, deviceId }) => {
   const isMatch = await user.comparePassword(password);
   if (!isMatch) throw new ApiError(401, "Invalid email or password");
 
-  // 3️⃣ Ensure account is active
+  // 3️⃣ Validate account state
   if (user.status !== "active") {
     throw new ApiError(403, "Your account is not active");
   }
 
-  // 4️⃣ Auto refresh premium state
+  // 4️⃣ Auto Expiry Check → update subscription if needed
   user = await refreshPremiumStatus(user);
 
-  // 5️⃣ Device checks
+  // ⚠️ Extract subscription limits properly
+  const maxDevicesAllowed = user.currentSubscription.maxDevicesAllowed;
   const existingDevice = user.devices.find((d) => d.deviceId === deviceId);
   const isNewDevice = !existingDevice;
-  const deviceLimitReached = user.devices.length >= user.maxDevicesAllowed;
+  const deviceLimitReached = user.devices.length >= maxDevicesAllowed;
 
-  // 🟢 1. EXISTING DEVICE → update lastActive + replace refreshToken
+  // 🟢 EXISTING DEVICE LOGIN
   if (existingDevice) {
     existingDevice.lastActive = Date.now();
 
@@ -38,14 +39,14 @@ export const loginUserService = async ({ email, password, deviceId }) => {
     await user.save();
 
     return {
-      type: "SUCCESS",
+      status: "SUCCESS",
       user,
       accessToken,
       refreshToken,
     };
   }
 
-  // 🟡 2. NEW DEVICE + LIMIT NOT REACHED → ADD DEVICE
+  // 🟡 NEW DEVICE + DEVICE SLOT AVAILABLE
   if (isNewDevice && !deviceLimitReached) {
     const { accessToken, refreshToken } =
       await generateAccessTokenAndRefreshToken(user._id);
@@ -61,19 +62,19 @@ export const loginUserService = async ({ email, password, deviceId }) => {
     await user.save();
 
     return {
-      type: "SUCCESS",
+      status: "SUCCESS",
       user,
       accessToken,
       refreshToken,
     };
   }
 
-  // 🔴 3. NEW DEVICE + LIMIT REACHED → BLOCK LOGIN
+  // 🔴 NEW DEVICE + LIMIT REACHED → BLOCK LOGIN
   if (isNewDevice && deviceLimitReached) {
     return {
-      type: "DEVICE_LIMIT",
+      status: "DEVICE_LIMIT",
       userId: user._id,
-      maxDevicesAllowed: user.maxDevicesAllowed,
+      maxDevicesAllowed,
       devices: user.devices.map((d) => ({
         deviceId: d.deviceId,
         deviceName: d.deviceName,
@@ -82,6 +83,5 @@ export const loginUserService = async ({ email, password, deviceId }) => {
     };
   }
 
-  // Fallback (should never hit)
   throw new ApiError(500, "Unexpected login state");
 };

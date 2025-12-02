@@ -1,5 +1,22 @@
-// models/subscriptionPlan.model.js
 import mongoose from "mongoose";
+
+const FeatureMappingSchema = new mongoose.Schema({
+  featureId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Feature",
+    required: true,
+  },
+  featureKey: {
+    type: String,
+    required: true,
+    trim: true,
+    lowercase: true,
+  },
+  value: {
+    type: mongoose.Schema.Types.Mixed,
+    required: true,
+  },
+});
 
 const SubscriptionPlanSchema = new mongoose.Schema(
   {
@@ -12,16 +29,18 @@ const SubscriptionPlanSchema = new mongoose.Schema(
     discountPercent: { type: Number, default: 0 },
     finalPrice: { type: Number, required: true },
 
-    // BENEFITS → Array of strings
+    // Dynamic Feature Assignment
+    features: {
+      type: [FeatureMappingSchema],
+      default: [],
+    },
+
     benefits: {
       type: [String],
       default: [],
     },
 
-    // Active status
     isActive: { type: Boolean, default: true },
-
-    // Ordering index for UI sorting
     order: { type: Number, default: 0 },
   },
   { timestamps: true }

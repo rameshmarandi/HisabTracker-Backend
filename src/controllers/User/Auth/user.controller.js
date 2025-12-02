@@ -9,19 +9,41 @@ import { refreshPremiumStatus } from "../../../services/subscriptionService/refr
 // -------------------------------------------------------------
 // HELPER — Refresh Premium if Expired
 // -------------------------------------------------------------
+
 const sanitizeUser = (user) => {
+  if (!user) return null;
+
   const u = user.toObject();
 
-  // Remove refreshToken inside devices array
-  u.devices = u.devices.map((d) => {
-    return {
+  // Remove sensitive fields
+  delete u.password;
+  delete u.refreshToken;
+  delete u.__v;
+  delete u.syncToken;
+
+  // Remove device refresh tokens
+  if (u.devices && Array.isArray(u.devices)) {
+    u.devices = u.devices.map((d) => ({
       deviceId: d.deviceId,
       deviceName: d.deviceName,
       lastActive: d.lastActive,
       lastSyncedAt: d.lastSyncedAt,
       _id: d._id,
-    };
-  });
+    }));
+  }
+
+  // Clean wallet
+  if (u.wallet) {
+    delete u.wallet._id;
+    delete u.wallet.totalUsedCash;
+  }
+
+  // Clean subscription object
+  if (u.currentSubscription) {
+    delete u.currentSubscription._id;
+    delete u.currentSubscription.isExpired; // internal-only
+    delete u.currentSubscription.internalNotes; // if future added
+  }
 
   return u;
 };
@@ -57,18 +79,7 @@ const registerUser = asyncHandler(async (req, res) => {
       )
     );
 });
-
 const loginUser = asyncHandler(async (req, res) => {
-  /**
-   * LOGIN LOGIC:
-   * - Validates: email, password, deviceId
-   * - Delegates business logic to loginUserService
-   * - Handles:
-   *      1. Existing device → update & login
-   *      2. New device + within limit → add & login
-   *      3. New device + limit reached → block + return device list + userId
-   */
-
   const { email, password, deviceId } = req.body;
 
   if (!email || !password || !deviceId) {
@@ -78,7 +89,7 @@ const loginUser = asyncHandler(async (req, res) => {
   const result = await loginUserService({ email, password, deviceId });
 
   // 🔴 Device limit reached → block login
-  if (result.type === "DEVICE_LIMIT") {
+  if (result.status === "DEVICE_LIMIT") {
     return res.status(403).json(
       new ApiResponse(
         403,
@@ -95,7 +106,7 @@ const loginUser = asyncHandler(async (req, res) => {
     );
   }
 
-  // 🟢 Successful login (existing or new device)
+  // 🟢 Successful login
   const sanitized = sanitizeUser(result.user);
 
   return res.status(200).json(

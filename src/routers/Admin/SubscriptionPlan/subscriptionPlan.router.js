@@ -10,13 +10,6 @@ import {
   toggleSubscriptionPlanStatus,
   deleteSubscriptionPlan,
 } from "../../../controllers/Admin/SubscriptionPlan/subscriptionPlan.controller.js";
-// import {
-//   createSubscriptionPlan,
-//   getAllSubscriptionPlans,
-//   updateSubscriptionPlan,
-//   toggleSubscriptionPlanStatus,
-//   deleteSubscriptionPlan,
-// } from "../../controllers/admin/subscriptionPlan.controller.js";
 
 const router = Router();
 

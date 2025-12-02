@@ -12,114 +12,138 @@ import { ENV } from "../../../utils/env.js";
 const deviceSchema = new mongoose.Schema({
   deviceId: { type: String, required: true },
   deviceName: { type: String, default: "Unknown Device" },
-  refreshToken: { type: String, default: null }, // <---- PER DEVICE TOKEN
+  refreshToken: { type: String, default: null },
   lastActive: { type: Number, default: Date.now() },
   lastSyncedAt: { type: Number, default: null },
 });
 
 // -------------------------------------------------------------
-// Wallet Schema (REAL DIGITAL CASH WALLET)
+// Wallet Schema
 // -------------------------------------------------------------
-
 const walletSchema = new mongoose.Schema({
-  balance: { type: Number, default: 0 }, // current usable balance
+  balance: { type: Number, default: 0 },
   totalEarnedCash: { type: Number, default: 0 },
   totalUsedCash: { type: Number, default: 0 },
 });
 
 // -------------------------------------------------------------
-// MAIN USER SCHEMA (HISABTRACKER FINAL)
+// Subscription Schema (New & Clean)
+// -------------------------------------------------------------
+const subscriptionSchema = new mongoose.Schema(
+  {
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubscriptionPlan",
+      default: null,
+    },
+
+    planKey: { type: String, default: null }, // ex: free, month_1, year_1
+    planName: { type: String, default: null }, // UI friendly display
+
+    isPremium: { type: Boolean, default: false },
+
+    features: { type: Object, default: {} },
+
+    maxDevicesAllowed: { type: Number, default: 1 },
+
+    startedAt: { type: Number, default: null },
+    expiresAt: { type: Number, default: null },
+
+    source: {
+      type: String,
+      enum: ["signup", "payment", "referral", "admin"],
+      default: "signup",
+    },
+  },
+  { _id: false }
+);
+
+// -------------------------------------------------------------
+// MAIN USER SCHEMA
 // -------------------------------------------------------------
 const UserSchema = new mongoose.Schema(
   {
-    // ---------------- AUTH ----------------
+    // AUTH
     username: { type: String, required: true, minlength: 3, maxlength: 50 },
-
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-    },
-
-    password: {
-      type: String,
-      required: true,
-      minlength: 6,
-      select: false,
-    },
+    email: { type: String, required: true, unique: true, lowercase: true },
+    password: { type: String, required: true, minlength: 6, select: false },
 
     refreshToken: { type: String },
 
-    // ---------------- SUBSCRIPTION ----------------
-    isPremium: { type: Boolean, default: false },
+    // DEVICE ACCESS
+    devices: { type: [deviceSchema], default: [] },
 
-    premiumPlanKey: { type: String, default: null }, // month_1, month_3, month_6, year_1
-    premiumStartedAt: { type: Number, default: null },
-    premiumExpiresAt: { type: Number, default: null },
-
-    featureAccess: {
-      type: Object,
-      default: {
-        cloudSync: false,
-        multiDevice: false,
-        premiumThemes: false,
-        advancedPdf: false,
-      },
+    // SUBSCRIPTION (Final Structure)
+    currentSubscription: {
+      type: subscriptionSchema,
+      default: () => ({
+        isPremium: false,
+        maxDevicesAllowed: 1,
+        features: {},
+        source: "signup",
+      }),
     },
 
-    maxDevicesAllowed: { type: Number, default: 1 }, // Free = 1, Premium = 3
-
-    devices: {
-      type: [deviceSchema],
-      default: [],
-    },
-
-    // ---------------- REFERRAL SYSTEM ----------------
-    referralCode: { type: String, unique: true }, // 6-digit numeric
+    // REFERRAL SYSTEM
+    referralCode: { type: String, unique: true },
     referredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
     },
 
-    wallet: {
-      type: walletSchema,
-      default: () => ({}),
-    },
+    // WALLET
+    wallet: { type: walletSchema, default: () => ({}) },
 
-    // ---------------- SYNC SYSTEM ----------------
+    // SYNC SYSTEM
     lastFullSyncAt: { type: Number, default: null },
     lastPartialSyncAt: { type: Number, default: null },
     lastSyncVersion: { type: Number, default: 0 },
     syncToken: { type: String, default: null },
 
-    // ---------------- ACCOUNT ----------------
+    // ACCOUNT
     status: {
       type: String,
       enum: ["active", "blocked", "deleted"],
       default: "active",
     },
 
-    // ---------------- FCM TOKEN (For Push Notifications) ----------------
-    firebaseToken: { type: String }, // <—— VERY IMPORTANT
+    firebaseToken: { type: String }, // For notifications
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
+    minimize: false,
   }
 );
 
 // -------------------------------------------------------------
-// Hide Sensitive Fields
+// Sanitize JSON Response
 // -------------------------------------------------------------
 UserSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  delete obj.password;
-  delete obj.__v;
-  delete obj.refreshToken;
-  return obj;
+  const u = this.toObject();
+
+  delete u.password;
+  delete u.refreshToken;
+  delete u.__v;
+  delete u.syncToken;
+
+  if (u.devices && Array.isArray(u.devices)) {
+    u.devices = u.devices.map((d) => ({
+      deviceId: d.deviceId,
+      deviceName: d.deviceName,
+      lastActive: d.lastActive,
+      lastSyncedAt: d.lastSyncedAt,
+      _id: d._id,
+    }));
+  }
+
+  if (u.wallet) {
+    delete u.wallet._id;
+  }
+
+  return u;
 };
 
 // -------------------------------------------------------------
@@ -127,27 +151,22 @@ UserSchema.methods.toJSON = function () {
 // -------------------------------------------------------------
 UserSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
-
   this.password = await bcrypt.hash(this.password, 10);
   next();
 });
 
 // -------------------------------------------------------------
-// Generate UNIQUE 6-Digit Referral Code per User
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// Generate UNIQUE Referral Code => "HT" + 6 digits  (8 characters total)
+// Generate UNIQUE Referral Code
 // -------------------------------------------------------------
 UserSchema.pre("save", async function (next) {
-  if (this.referralCode) return next(); // already exists? skip
+  if (this.referralCode) return next();
 
   let code;
   let exists = true;
 
   while (exists) {
     const digits = Math.floor(100000 + Math.random() * 900000).toString();
-    code = "HT" + digits; // Always 8 chars: Example -> HT123456
-
+    code = "HT" + digits;
     exists = await this.constructor.exists({ referralCode: code });
   }
 
@@ -156,41 +175,27 @@ UserSchema.pre("save", async function (next) {
 });
 
 // -------------------------------------------------------------
-// Compare Password
+// PASSWORD CHECK
 // -------------------------------------------------------------
 UserSchema.methods.comparePassword = async function (plainPassword) {
-  return await bcrypt.compare(plainPassword, this.password);
+  return bcrypt.compare(plainPassword, this.password);
 };
 
 // -------------------------------------------------------------
-// Generate Access Token
+// TOKEN GENERATORS
 // -------------------------------------------------------------
 UserSchema.methods.generateAccessToken = function () {
-  try {
-    return jwt.sign(
-      {
-        _id: this._id,
-        email: this.email,
-      },
-      ENV.ACCESS_TOKEN_SECRET,
-      { expiresIn: ENV.ACCESS_TOKEN_EXPIRY }
-    );
-  } catch (error) {
-    throw new ApiError(500, "Error generating access token");
-  }
+  return jwt.sign(
+    { _id: this._id, email: this.email },
+    ENV.ACCESS_TOKEN_SECRET,
+    { expiresIn: ENV.ACCESS_TOKEN_EXPIRY }
+  );
 };
 
-// -------------------------------------------------------------
-// Generate Refresh Token
-// -------------------------------------------------------------
 UserSchema.methods.generateRefreshToken = function () {
-  try {
-    return jwt.sign({ _id: this._id }, ENV.REFRESH_TOKEN_SECRET, {
-      expiresIn: ENV.REFRESH_TOKEN_EXPIRY,
-    });
-  } catch (error) {
-    throw new ApiError(500, "Error generating refresh token");
-  }
+  return jwt.sign({ _id: this._id }, ENV.REFRESH_TOKEN_SECRET, {
+    expiresIn: ENV.REFRESH_TOKEN_EXPIRY,
+  });
 };
 
 export const User = mongoose.model("User", UserSchema);
