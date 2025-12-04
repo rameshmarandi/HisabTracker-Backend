@@ -5,6 +5,8 @@ import { asyncHandler } from "../../../utils/asyncHandler.js";
 import { registerUserService } from "../../../services/authService/register.service.js";
 import { loginUserService } from "../../../services/authService/login.service.js";
 import { refreshPremiumStatus } from "../../../services/subscriptionService/refreshPremiumStatus.service.js";
+import jwt from "jsonwebtoken";
+import { encryptToken } from "../../../utils/TokenCrypto.js";
 
 // -------------------------------------------------------------
 // HELPER — Refresh Premium if Expired
@@ -279,6 +281,70 @@ const logoutUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "Logout successful for this device"));
 });
 
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  const { refreshToken, deviceId } = req.body;
+
+  if (!refreshToken || !deviceId) {
+    throw new ApiError(401, "refreshToken & deviceId required");
+  }
+
+  // 🔓 1️⃣ Decrypt token received from frontend
+  const rawRefreshToken = decryptToken(refreshToken);
+
+  // 2️⃣ Verify JWT validity & expiry
+  let decoded;
+  try {
+    decoded = jwt.verify(rawRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+  } catch (error) {
+    throw new ApiError(401, "Invalid or expired refresh token");
+  }
+
+  // 3️⃣ Fetch user
+  const user = await User.findById(decoded._id);
+  if (!user) throw new ApiError(401, "User not found");
+
+  // 4️⃣ Validate refresh token belongs to this device
+  const device = user.devices.find((d) => d.deviceId === deviceId);
+
+  if (!device || device.refreshToken !== refreshToken) {
+    throw new ApiError(403, "Device mismatch or token invalid");
+  }
+
+  // 🔑 5️⃣ Generate NEW JWTs (Plain text temporarily)
+  const newAccessToken = jwt.sign(
+    { _id: user._id },
+    process.env.ACCESS_TOKEN_SECRET,
+    { expiresIn: "15m" }
+  );
+
+  const newRefreshToken = jwt.sign(
+    { _id: user._id },
+    process.env.REFRESH_TOKEN_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  // 🔐 6️⃣ Encrypt both new tokens BEFORE storing + sending
+  const encryptedAccessToken = encryptToken(newAccessToken);
+  const encryptedRefreshToken = encryptToken(newRefreshToken);
+
+  // 🔄 7️⃣ Store encrypted token for this specific device
+  device.refreshToken = encryptedRefreshToken;
+  device.lastActive = new Date();
+
+  await user.save({ validateBeforeSave: false });
+
+  // 🟢 8️⃣ Send encrypted tokens only (global encryption middleware will re-encrypt entire payload)
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        accessToken: encryptedAccessToken,
+        refreshToken: encryptedRefreshToken,
+      },
+      "Token refreshed successfully"
+    )
+  );
+});
 // -------------------------------------------------------------
 // EXPORT ALL CONTROLLERS (READABLE + EASY TO FIND)
 // -------------------------------------------------------------
@@ -289,4 +355,5 @@ export {
   getCurrentUser,
   logoutUser,
   removeDevice,
+  refreshAccessToken,
 };

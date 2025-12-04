@@ -6,62 +6,54 @@ import { User } from "../models/User/Auth/user.model.js";
 import { decryptData } from "../utils/CryptoUtils.js";
 import { ADMIN_ROLES, USER_ROLES } from "../constant.js";
 import { ENV } from "../utils/env.js";
+import { decryptToken } from "../utils/TokenCrypto.js";
 /**
  * Verify JWT for Users (User Model)
  */
 export const verifyUserJWT = asyncHandler(async (req, res, next) => {
   try {
-    const token =
+    // Get encrypted token from header or cookie
+    const encryptedToken =
       req.cookies?.accessToken ||
       req.header("Authorization")?.replace("Bearer ", "");
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        statusCode: 401,
-        message: "Unauthorized: No access token provided",
-      });
+    if (!encryptedToken) {
+      throw new ApiError(401, "Unauthorized: Token missing");
     }
 
-    // Decrypt Token Before Verifying
-
-    // const { decryptedData } = decryptData(token);
-
-    let decodedToken;
+    // 🔓 1️⃣ Decrypt token BEFORE verifying
+    let rawToken;
     try {
-      decodedToken = jwt.verify(token, ENV.ACCESS_TOKEN_SECRET);
-    } catch (error) {
-      return res.status(401).json({
-        success: false,
-        statusCode: 401,
-        message: "Unauthorized: Invalid or expired token",
-      });
+      rawToken = decryptToken(encryptedToken);
+    } catch (err) {
+      throw new ApiError(401, "Unauthorized: Invalid encrypted token");
     }
 
-    const user = await User.findById(decodedToken?._id).select(
+    // 2️⃣ Verify raw JWT signature + expiry
+    let decoded;
+    try {
+      decoded = jwt.verify(rawToken, ENV.ACCESS_TOKEN_SECRET);
+    } catch (error) {
+      throw new ApiError(401, "Unauthorized: Token expired or invalid");
+    }
+
+    // 3️⃣ Check if user exists & active
+    const user = await User.findById(decoded?._id).select(
       "-password -refreshToken"
     );
 
     if (!user) {
-      return res.status(403).json({
-        success: false,
-        statusCode: 403,
-        message: "Unauthorized: User not found",
-      });
+      throw new ApiError(403, "User not found, unauthorized");
     }
 
+    // 4️⃣ Attach user to request
     req.user = user;
     next();
-  } catch (error) {
-    console.error("verifyUserJWT Error:", error);
-    return res.status(500).json({
-      success: false,
-      statusCode: 500,
-      message: "Internal Server Error",
-    });
+  } catch (err) {
+    console.error("verifyUserJWT Error:", err);
+    next(err);
   }
 });
-
 // export const verifyAdminJWT = asyncHandler(async (req, res, next) => {
 //   try {
 //     // ✅ Extract Token from Cookies or Authorization Header

@@ -11,11 +11,13 @@ import {
   getCurrentUser,
   logoutUser,
   removeDevice,
+  refreshAccessToken,
 } from "../../../controllers/User/Auth/user.controller.js";
 import { validateRequest } from "../../../middlewares/validation.middleware.js";
 import {
   loginSchema,
   logoutSchema,
+  refreshTokenSchema,
   registerSchema,
 } from "../../../validators/auth.validator.js";
 import { updateDeviceInfoSchema } from "../../../validators/device.validator.js";
@@ -70,12 +72,18 @@ router.post(
   validateRequest(logoutSchema),
   circuitBreakerMiddleware(logoutUser)
 );
+router.post(
+  "/getRefreshToken",
+  verifyUserJWT,
+  validateRequest(refreshTokenSchema),
+  circuitBreakerMiddleware(refreshAccessToken)
+);
 
 // ------------------------------------------
 // UPDATE DEVICE INFO (FCM + device meta)
 // ------------------------------------------
 router.post(
-  "/update-device-info",
+  "/updateDeviceInfo",
   verifyUserJWT,
   validateRequest(updateDeviceInfoSchema),
   circuitBreakerMiddleware(updateDeviceInfo)

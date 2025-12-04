@@ -17,3 +17,18 @@ export const loginSchema = Joi.object({
 export const logoutSchema = Joi.object({
   deviceId: Joi.string().min(3).required(),
 }).unknown(false);
+
+export const refreshTokenSchema = Joi.object({
+  refreshToken: Joi.string().trim().required().messages({
+    "string.base": "refreshToken must be a string",
+    "string.empty": "refreshToken is required",
+    "any.required": "refreshToken is required",
+  }),
+
+  deviceId: Joi.string().trim().min(3).required().messages({
+    "string.base": "deviceId must be a string",
+    "string.empty": "deviceId cannot be empty",
+    "string.min": "Invalid deviceId",
+    "any.required": "deviceId is required",
+  }),
+}).unknown(false);

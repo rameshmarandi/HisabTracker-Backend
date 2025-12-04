@@ -71,13 +71,16 @@ import authRouter from "./routers/User/Auth/auth.routes.js";
 import syncRouter from "./routers/sync/sync.routes.js";
 import transactionRouter from "./routers/User/TransactionHistory/transactionHistory.router.js";
 import subscriptionPurchaseRouter from "./routers/User/Subscriptions/subscriptionPurchase.routes.js";
-
+import globalConfigRouter from "./routers/User/UserConfig/globalConfig.router.js";
 //Schedular
 startSchedulers();
 //
 //Declaration of routes
 
 app.use("/api/v1", encryptionRouter); // encryption || decryption
+
+// Configs
+app.use("/api/v1/config", globalConfigRouter);
 
 //Admin
 app.use("/api/v1/admin/appConfig", appConfig);
