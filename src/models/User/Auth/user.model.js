@@ -9,13 +9,27 @@ import { ENV } from "../../../utils/env.js";
 // -------------------------------------------------------------
 // Device Schema
 // -------------------------------------------------------------
-const deviceSchema = new mongoose.Schema({
-  deviceId: { type: String, required: true },
-  deviceName: { type: String, default: "Unknown Device" },
-  refreshToken: { type: String, default: null },
-  lastActive: { type: Number, default: Date.now() },
-  lastSyncedAt: { type: Number, default: null },
-});
+
+const deviceSchema = new mongoose.Schema(
+  {
+    deviceId: { type: String, required: true },
+    deviceName: { type: String, default: "Unknown Device" },
+
+    // New fields (from client)
+    platform: { type: String, default: null },
+    model: { type: String, default: null },
+    osVersion: { type: String, default: null },
+    manufacturer: { type: String, default: null },
+    appVersion: { type: String, default: null },
+    buildNumber: { type: String, default: null },
+    isEmulator: { type: Boolean, default: false },
+
+    refreshToken: { type: String, default: null },
+    lastActive: { type: Number, default: Date.now() },
+    lastSyncedAt: { type: Number, default: null },
+  },
+  { _id: false }
+);
 
 // -------------------------------------------------------------
 // Wallet Schema

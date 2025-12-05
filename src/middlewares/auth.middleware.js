@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { ApiError } from "../utils/ApiError.js";
+
 import { asyncHandler } from "../utils/asyncHandler.js";
 // import { Admin } from "../models/Admin/Auth/admin.model.js";
 import { User } from "../models/User/Auth/user.model.js";
@@ -7,6 +8,7 @@ import { decryptData } from "../utils/CryptoUtils.js";
 import { ADMIN_ROLES, USER_ROLES } from "../constant.js";
 import { ENV } from "../utils/env.js";
 import { decryptToken } from "../utils/TokenCrypto.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
 /**
  * Verify JWT for Users (User Model)
  */
@@ -54,6 +56,80 @@ export const verifyUserJWT = asyncHandler(async (req, res, next) => {
     next(err);
   }
 });
+export const verifyDeviceAccess = asyncHandler(async (req, res, next) => {
+  const deviceId = req.header("x-device-id");
+  if (!deviceId) {
+    throw new ApiError(
+      401,
+      "Unauthorized: Device ID missing",
+      "device-missing"
+    );
+  }
+
+  const user = req.user;
+  const device = user.devices.find((d) => d.deviceId === deviceId);
+
+  if (device) {
+    return res.status(403).json(
+      new ApiResponse(
+        403,
+        {
+          reason: "device-not-registered",
+          devices: user.devices.map((d) => ({
+            deviceId: d.deviceId,
+            deviceName: d.deviceName,
+            lastActive: d.lastActive,
+          })),
+        },
+        "New device detected — Login required"
+      )
+    );
+  }
+
+  device.lastActive = Date.now();
+  await user.save();
+  next();
+});
+
+export const enforceDeviceLimit = asyncHandler(async (req, res, next) => {
+  const user = req.user;
+  const maxDevices = user.currentSubscription?.maxDevicesAllowed || 1;
+
+  if (user.devices.length > maxDevices) {
+    return res.status(403).json({
+      statusCode: 403,
+      success: false,
+      reason: "device-limit-reached",
+      message: "Device limit exceeded. Remove a device to continue.",
+      data: {
+        devices: user.devices,
+        maxDevicesAllowed: maxDevices,
+      },
+    });
+  }
+
+  next();
+});
+
+export const checkSubscriptionStatus = asyncHandler(async (req, res, next) => {
+  const { currentSubscription: sub } = req.user;
+
+  if (sub?.isPremium && sub?.expiresAt && Date.now() > sub.expiresAt) {
+    return res.status(402).json({
+      statusCode: 402,
+      success: false,
+      reason: "subscription-expired",
+      message:
+        "Subscription expired. Please renew to continue using premium features.",
+      data: {
+        expiresAt: sub.expiresAt,
+      },
+    });
+  }
+
+  next();
+});
+
 // export const verifyAdminJWT = asyncHandler(async (req, res, next) => {
 //   try {
 //     // ✅ Extract Token from Cookies or Authorization Header

@@ -3,7 +3,10 @@ import { Router } from "express";
 // import circuitBreakerMiddleware from "../middlewares/circuitBreakerMiddleware.js";
 import circuitBreakerMiddleware from "../../../middlewares/circuitBreakerMiddleware.js";
 // import { verifyUserJWT } from "../middlewares/auth.middleware.js";
-import { verifyUserJWT } from "../../../middlewares/auth.middleware.js";
+import {
+  verifyDeviceAccess,
+  verifyUserJWT,
+} from "../../../middlewares/auth.middleware.js";
 import {
   registerUser,
   loginUser,
@@ -19,6 +22,7 @@ import {
   logoutSchema,
   refreshTokenSchema,
   registerSchema,
+  removeDeviceSchema,
 } from "../../../validators/auth.validator.js";
 import { updateDeviceInfoSchema } from "../../../validators/device.validator.js";
 // import { loginRateLimiter } from "../services/rateLimiter.js"; // (optional)
@@ -51,6 +55,7 @@ router.post(
 router.post(
   "/removeDevice",
   // loginRateLimiter,
+  validateRequest(removeDeviceSchema),
   circuitBreakerMiddleware(removeDevice)
 );
 
@@ -60,6 +65,7 @@ router.post(
 router.get(
   "/myProfile",
   verifyUserJWT,
+  verifyDeviceAccess,
   circuitBreakerMiddleware(getCurrentUser)
 );
 
@@ -69,12 +75,12 @@ router.get(
 router.post(
   "/logout",
   verifyUserJWT,
+  // verifyDeviceAccess,
   validateRequest(logoutSchema),
   circuitBreakerMiddleware(logoutUser)
 );
 router.post(
   "/getRefreshToken",
-  verifyUserJWT,
   validateRequest(refreshTokenSchema),
   circuitBreakerMiddleware(refreshAccessToken)
 );

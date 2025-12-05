@@ -32,3 +32,18 @@ export const refreshTokenSchema = Joi.object({
     "any.required": "deviceId is required",
   }),
 }).unknown(false);
+
+export const removeDeviceSchema = Joi.object({
+  userId: Joi.string().trim().required().messages({
+    "string.base": "userId must be a string",
+    "string.empty": "userId is required",
+    "any.required": "userId is required",
+  }),
+
+  deviceId: Joi.string().trim().min(3).required().messages({
+    "string.base": "deviceId must be a string",
+    "string.empty": "deviceId cannot be empty",
+    "string.min": "Invalid deviceId",
+    "any.required": "deviceId is required",
+  }),
+}).unknown(false);

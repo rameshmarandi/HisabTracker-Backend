@@ -6,7 +6,7 @@ import { registerUserService } from "../../../services/authService/register.serv
 import { loginUserService } from "../../../services/authService/login.service.js";
 import { refreshPremiumStatus } from "../../../services/subscriptionService/refreshPremiumStatus.service.js";
 import jwt from "jsonwebtoken";
-import { encryptToken } from "../../../utils/TokenCrypto.js";
+import { decryptToken, encryptToken } from "../../../utils/TokenCrypto.js";
 
 // -------------------------------------------------------------
 // HELPER — Refresh Premium if Expired
@@ -180,36 +180,135 @@ const removeDevice = asyncHandler(async (req, res) => {
 // -------------------------------------------------------------
 // UPDATE DEVICE INFO (firebaseToken, deviceName, technical data)
 // -------------------------------------------------------------
+// const updateDeviceInfo = asyncHandler(async (req, res) => {
+//   /**
+//    * NOTES:
+//    * - Called AFTER login
+//    * - Updates firebase token for push notifications
+//    * - Stores deviceName (shown in UI)
+//    * - Updates platform, OS version, build number, model, etc.
+//    * - Does NOT perform device limit validation
+//    */
+
+//   const userId = req.user._id;
+
+//   const { firebaseToken, deviceName, deviceInfo = {} } = req.body;
+
+//   console.log("updateInf_body", req.body);
+
+//   const user = await User.findById(userId);
+//   if (!user) throw new ApiError(404, "User not found");
+
+//   if (firebaseToken) user.firebaseToken = firebaseToken;
+
+//   if (deviceName && deviceInfo.deviceId) {
+//     const idx = user.devices.findIndex(
+//       (d) => d.deviceId === deviceInfo.deviceId
+//     );
+//     if (idx !== -1) user.devices[idx].deviceName = deviceName;
+//   }
+
+//   user.deviceInfo = {
+//     ...user.deviceInfo,
+//     ...deviceInfo,
+//   };
+
+//   await user.save();
+
+//   return res
+//     .status(200)
+//     .json(new ApiResponse(200, { user }, "Device info updated successfully"));
+// });
+
+// const updateDeviceInfo = asyncHandler(async (req, res) => {
+//   const userId = req.user._id;
+
+//   const { firebaseToken, deviceName, deviceInfo = {} } = req.body;
+
+//   if (!deviceInfo.deviceId) {
+//     throw new ApiError(400, "Device ID missing");
+//   }
+
+//   const user = await User.findById(userId);
+//   if (!user) throw new ApiError(404, "User not found");
+
+//   // Update Firebase Token if provided
+//   if (firebaseToken !== undefined) {
+//     user.firebaseToken = firebaseToken;
+//   }
+
+//   const deviceId = deviceInfo.deviceId;
+//   const idx = user.devices.findIndex((d) => d.deviceId === deviceId);
+
+//   const devicePayload = {
+//     ...deviceInfo,
+//     deviceName: deviceName || deviceInfo.deviceName || "Unknown Device",
+//     lastActive: Date.now(),
+//   };
+
+//   if (idx !== -1) {
+//     // Update existing device
+//     user.devices[idx] = {
+//       ...user.devices[idx]._doc,
+//       ...devicePayload,
+//     };
+//   } else {
+//     // Add new device
+//     user.devices.push(devicePayload);
+//   }
+
+//   await user.save();
+
+//   return res
+//     .status(200)
+//     .json(new ApiResponse(200, { user }, "Device info updated successfully"));
+// });
+
 const updateDeviceInfo = asyncHandler(async (req, res) => {
-  /**
-   * NOTES:
-   * - Called AFTER login
-   * - Updates firebase token for push notifications
-   * - Stores deviceName (shown in UI)
-   * - Updates platform, OS version, build number, model, etc.
-   * - Does NOT perform device limit validation
-   */
-
   const userId = req.user._id;
-
   const { firebaseToken, deviceName, deviceInfo = {} } = req.body;
+
+  console.log("updateDevice_info", req.body);
+
+  if (!deviceInfo.deviceId) {
+    throw new ApiError(400, "Device ID missing");
+  }
 
   const user = await User.findById(userId);
   if (!user) throw new ApiError(404, "User not found");
 
-  if (firebaseToken) user.firebaseToken = firebaseToken;
-
-  if (deviceName && deviceInfo.deviceId) {
-    const idx = user.devices.findIndex(
-      (d) => d.deviceId === deviceInfo.deviceId
-    );
-    if (idx !== -1) user.devices[idx].deviceName = deviceName;
+  // Update Firebase Token if provided
+  if (firebaseToken !== undefined) {
+    user.firebaseToken = firebaseToken;
   }
 
-  user.deviceInfo = {
-    ...user.deviceInfo,
-    ...deviceInfo,
+  const deviceId = deviceInfo.deviceId;
+  const idx = user.devices.findIndex((d) => d.deviceId === deviceId);
+
+  // Clean Payload (truncate – only accept valid schema keys)
+  const devicePayload = {
+    deviceId: deviceInfo.deviceId,
+    deviceName: deviceName || deviceInfo.deviceName || "Unknown Device",
+    platform: deviceInfo.platform || null,
+    model: deviceInfo.model || null,
+    osVersion: deviceInfo.osVersion || null,
+    manufacturer: deviceInfo.manufacturer || null,
+    appVersion: deviceInfo.appVersion || null,
+    buildNumber: deviceInfo.buildNumber || null,
+    isEmulator: deviceInfo.isEmulator === true ? true : false,
+
+    refreshToken: null, // will be updated on token rotate
+    lastActive: Date.now(),
+    lastSyncedAt: deviceInfo.lastSyncedAt || null,
   };
+
+  if (idx !== -1) {
+    // FULL replace existing device (no leftover keys)
+    user.devices[idx] = devicePayload;
+  } else {
+    // Add new record
+    user.devices.push(devicePayload);
+  }
 
   await user.save();
 
