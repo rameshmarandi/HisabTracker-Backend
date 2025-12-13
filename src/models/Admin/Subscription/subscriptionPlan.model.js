@@ -21,15 +21,35 @@ const FeatureMappingSchema = new mongoose.Schema({
 const SubscriptionPlanSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, unique: true, trim: true },
+
+    // 🔥 Very Important for logic: plan identity
+    planKey: {
+      type: String,
+      required: true,
+      enum: [
+        "free", // Free Tier
+        "monthly", // 30 Days
+        "quarterly", // 90 Days
+        "yearly", // 365 Days
+        "lifetime", // Future Option
+      ],
+      index: true,
+    },
+
     description: { type: String },
+
+    // 30 / 90 / 365 etc. for premium plans
     durationInDays: { type: Number, required: true },
 
-    // Pricing
+    // For deciding if expiry logic applies
+    hasExpiry: { type: Boolean, default: true },
+
+    // Pricing information
     basePrice: { type: Number, required: true },
     discountPercent: { type: Number, default: 0 },
     finalPrice: { type: Number, required: true },
 
-    // Dynamic Feature Assignment
+    // Feature mapping (dynamic)
     features: {
       type: [FeatureMappingSchema],
       default: [],

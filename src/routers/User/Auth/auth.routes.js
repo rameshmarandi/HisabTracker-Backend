@@ -15,6 +15,7 @@ import {
   logoutUser,
   removeDevice,
   refreshAccessToken,
+  getUserSubscriptionStatus,
 } from "../../../controllers/User/Auth/user.controller.js";
 import { validateRequest } from "../../../middlewares/validation.middleware.js";
 import {
@@ -67,6 +68,12 @@ router.get(
   verifyUserJWT,
   verifyDeviceAccess,
   circuitBreakerMiddleware(getCurrentUser)
+);
+router.get(
+  "/subscriptionStatus",
+  verifyUserJWT,
+  // verifyDeviceAccess,
+  circuitBreakerMiddleware(getUserSubscriptionStatus)
 );
 
 // ------------------------------------------

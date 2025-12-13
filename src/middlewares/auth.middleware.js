@@ -67,9 +67,18 @@ export const verifyDeviceAccess = asyncHandler(async (req, res, next) => {
   }
 
   const user = req.user;
-  const device = user.devices.find((d) => d.deviceId === deviceId);
 
-  if (device) {
+  console.log("user_list", {
+    user,
+    deviceId,
+  });
+  const device = user.devices.find((d) => {
+    console.log("Device_listed_hers", d);
+
+    return d.deviceId == deviceId;
+  });
+
+  if (!device) {
     return res.status(403).json(
       new ApiResponse(
         403,

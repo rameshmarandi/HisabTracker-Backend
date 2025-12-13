@@ -65,8 +65,17 @@ const subscriptionSchema = new mongoose.Schema(
 
     source: {
       type: String,
-      enum: ["signup", "payment", "referral", "admin"],
+      enum: [
+        "signup", // Free default during registration
+        "trial", // Free trial premium
+        "payment", // First time paid purchase
+        "renewal", // Subscription renewal
+        "referral", // Referral bonus upgrade
+        "admin", // Admin manually applied
+        "promo", // Special promotion / event upgrade
+      ],
       default: "signup",
+      index: true,
     },
   },
   { _id: false }

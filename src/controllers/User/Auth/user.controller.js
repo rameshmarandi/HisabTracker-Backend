@@ -7,44 +7,36 @@ import { loginUserService } from "../../../services/authService/login.service.js
 import { refreshPremiumStatus } from "../../../services/subscriptionService/refreshPremiumStatus.service.js";
 import jwt from "jsonwebtoken";
 import { decryptToken, encryptToken } from "../../../utils/TokenCrypto.js";
+import { formatSubscriptionResponse } from "../../../services/authService/subscriptionFormatter.js";
+import { mapUserResponse } from "../../../services/authService/responseMapper.js";
 
 // -------------------------------------------------------------
 // HELPER — Refresh Premium if Expired
 // -------------------------------------------------------------
 
-const sanitizeUser = (user) => {
+export const sanitizeUser = (user) => {
   if (!user) return null;
 
-  const u = user.toObject();
+  const u = typeof user.toObject === "function" ? user.toObject() : { ...user };
 
-  // Remove sensitive fields
   delete u.password;
   delete u.refreshToken;
   delete u.__v;
   delete u.syncToken;
+  delete u.currentSubscription; // always separate return
 
-  // Remove device refresh tokens
-  if (u.devices && Array.isArray(u.devices)) {
+  if (u.devices) {
     u.devices = u.devices.map((d) => ({
       deviceId: d.deviceId,
       deviceName: d.deviceName,
       lastActive: d.lastActive,
       lastSyncedAt: d.lastSyncedAt,
-      _id: d._id,
     }));
   }
 
-  // Clean wallet
   if (u.wallet) {
     delete u.wallet._id;
     delete u.wallet.totalUsedCash;
-  }
-
-  // Clean subscription object
-  if (u.currentSubscription) {
-    delete u.currentSubscription._id;
-    delete u.currentSubscription.isExpired; // internal-only
-    delete u.currentSubscription.internalNotes; // if future added
   }
 
   return u;
@@ -57,30 +49,33 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Username, email, password & deviceId required");
   }
 
-  const { user, accessToken, refreshToken, referrerUser } =
-    await registerUserService({
-      username,
-      email,
-      password,
-      deviceId,
-      referralCode,
-    });
+  const result = await registerUserService({
+    username,
+    email,
+    password,
+    deviceId,
+    referralCode,
+  });
 
-  const sanitized = sanitizeUser(user);
-  sanitized.walletBalance = user.wallet?.balance || 0;
+  const sanitizedUser = sanitizeUser(result.user);
 
-  res
-    .status(201)
-    .json(
-      new ApiResponse(
-        201,
-        { user: sanitized, accessToken, refreshToken },
-        referrerUser
-          ? "Registered successfully. Referral applied & wallet credited."
-          : "Registered successfully"
-      )
-    );
+  return res.status(201).json(
+    new ApiResponse(
+      201,
+      {
+        user: sanitizedUser,
+        subscription: result.subscription,
+        wallet: result.wallet,
+        accessToken: result.accessToken, // FIXED
+        refreshToken: result.refreshToken, // FIXED
+      },
+      result.referrerUser
+        ? "Registered successfully. Referral applied & wallet credited."
+        : "Registered successfully"
+    )
+  );
 });
+
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password, deviceId } = req.body;
 
@@ -90,7 +85,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const result = await loginUserService({ email, password, deviceId });
 
-  // 🔴 Device limit reached → block login
+  // 🔴 Device limit reached
   if (result.status === "DEVICE_LIMIT") {
     return res.status(403).json(
       new ApiResponse(
@@ -98,8 +93,6 @@ const loginUser = asyncHandler(async (req, res) => {
         {
           error: "device_limit_reached",
           userId: result.userId,
-          message:
-            "You have reached your device limit. Remove a device to continue.",
           devices: result.devices,
           maxDevicesAllowed: result.maxDevicesAllowed,
         },
@@ -108,20 +101,41 @@ const loginUser = asyncHandler(async (req, res) => {
     );
   }
 
-  // 🟢 Successful login
-  const sanitized = sanitizeUser(result.user);
+  // 🟢 SUCCESS
+  const sanitizedUser = sanitizeUser(result.user);
 
   return res.status(200).json(
     new ApiResponse(
       200,
       {
-        user: sanitized,
+        user: sanitizedUser,
+        subscription: result.subscription, // Already formatted in service
+        wallet: result.wallet, // Provided by service
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
       "Login successful"
     )
   );
+});
+
+const getUserSubscriptionStatus = asyncHandler(async (req, res) => {
+  const userId = req.user?._id;
+  if (!userId) throw new ApiError(401, "Unauthorized");
+
+  const user = await User.findById(userId).select(
+    "currentSubscription wallet.balance"
+  );
+  if (!user) throw new ApiError(404, "User not found");
+
+  const subResponse = formatSubscriptionResponse(
+    user.currentSubscription,
+    user.wallet?.balance || 0
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, subResponse, "Subscription status fetched"));
 });
 
 // -------------------------------------------------------------
@@ -268,7 +282,7 @@ const updateDeviceInfo = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { firebaseToken, deviceName, deviceInfo = {} } = req.body;
 
-  console.log("updateDevice_info", req.body);
+  // console.log("updateDevice_info", req.body);
 
   if (!deviceInfo.deviceId) {
     throw new ApiError(400, "Device ID missing");
@@ -330,11 +344,20 @@ const getCurrentUser = asyncHandler(async (req, res) => {
   let user = await User.findById(req.user._id);
   if (!user) throw new ApiError(404, "User not found");
 
-  user = await refreshPremiumStatus(user);
+  // 🔁 Update subscription state if expired (only if needed)
+  // user = await refreshPremiumStatus(user);
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user, "User fetched successfully"));
+  // 🎯 Return SAME format as login response
+  const responseData = await mapUserResponse(user, {
+    includeTokens: false, // NEVER return new token here
+  });
+
+  return res.status(200).json({
+    statusCode: 200,
+    data: responseData,
+    message: "User fetched successfully",
+    success: true,
+  });
 });
 
 // -------------------------------------------------------------
@@ -455,4 +478,5 @@ export {
   logoutUser,
   removeDevice,
   refreshAccessToken,
+  getUserSubscriptionStatus,
 };

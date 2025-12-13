@@ -45,18 +45,82 @@ const pushChanges = asyncHandler(async (req, res) => {
 
     let existing = null;
 
-    if (serverId) {
-      existing = await model.findOne({ _id: serverId, user: userId });
+    /* =====================================================
+       🔑 STRONG IDENTITY RESOLUTION (NO DUPLICATES)
+    ===================================================== */
+
+    // ---------- BOOKS ----------
+    if (tableName === "books") {
+      // 1️⃣ Default book is UNIQUE per user
+      if (base.isDefault === true) {
+        existing = await model.findOne({
+          user: userId,
+          isDefault: true,
+        });
+      }
+
+      // 2️⃣ Server ID (strongest)
+      if (!existing && serverId) {
+        existing = await model.findOne({
+          _id: serverId,
+          user: userId,
+        });
+      }
+
+      // 3️⃣ Local ID fallback
+      if (!existing) {
+        existing = await model.findOne({
+          user: userId,
+          localId: base.localId,
+        });
+      }
     }
 
-    if (!existing) {
+    // ---------- CATEGORIES ----------
+    else if (tableName === "categories") {
+      // Category uniqueness = user + book + name + isDefault
       existing = await model.findOne({
         user: userId,
-        localId: base.localId,
+        book: domain.book,
+        name: domain.name,
+        isDefault: base.isDefault,
       });
+
+      if (!existing && serverId) {
+        existing = await model.findOne({
+          _id: serverId,
+          user: userId,
+        });
+      }
+
+      if (!existing) {
+        existing = await model.findOne({
+          user: userId,
+          localId: base.localId,
+        });
+      }
     }
 
-    // ---------------- CREATE CASE ----------------
+    // ---------- TRANSACTIONS ----------
+    else if (tableName === "transactions") {
+      if (serverId) {
+        existing = await model.findOne({
+          _id: serverId,
+          user: userId,
+        });
+      }
+
+      if (!existing) {
+        existing = await model.findOne({
+          user: userId,
+          localId: base.localId,
+        });
+      }
+    }
+
+    /* =====================================================
+       🆕 CREATE
+    ===================================================== */
     if (!existing) {
       if (base.isDeleted) {
         resultByTable[tableName].push({
@@ -73,8 +137,8 @@ const pushChanges = asyncHandler(async (req, res) => {
         ...base,
       });
 
-      // Handle image uploads only for Transactions
-      if (tableName === "transactions" && photo.mode === "upload") {
+      // 🖼 Transaction image upload
+      if (tableName === "transactions" && photo?.mode === "upload") {
         const uploaded = await uploadOnCloudinary(photo.value);
         if (uploaded) {
           newDoc.photoUrl = uploaded.secure_url;
@@ -95,11 +159,13 @@ const pushChanges = asyncHandler(async (req, res) => {
       continue;
     }
 
-    // ---------------- UPDATE/DELETE CASE ----------------
+    /* =====================================================
+       🔄 UPDATE / DELETE
+    ===================================================== */
     const incomingVersion = base.changeVersion;
     const currentVersion = existing.changeVersion;
 
-    // Reject if client is out-of-date
+    // Reject outdated client update
     if (incomingVersion < currentVersion) {
       resultByTable[tableName].push({
         client_id: existing.localId,
@@ -111,7 +177,7 @@ const pushChanges = asyncHandler(async (req, res) => {
       continue;
     }
 
-    // Same version → updatedAt decides
+    // Same version → timestamp wins
     if (
       incomingVersion === currentVersion &&
       base.updatedAt <= existing.updatedAt
@@ -137,7 +203,7 @@ const pushChanges = asyncHandler(async (req, res) => {
       Object.assign(existing, domain);
     }
 
-    // 🔥 IMAGE LOGIC - TRANSACTIONS ONLY
+    // 🖼 Transaction image handling
     if (tableName === "transactions") {
       if (base.isDeleted) {
         if (existing.photoId) {
@@ -146,7 +212,7 @@ const pushChanges = asyncHandler(async (req, res) => {
           existing.photoId = null;
         }
       } else {
-        if (photo.mode === "upload") {
+        if (photo?.mode === "upload") {
           if (existing.photoId) {
             await deleteFromCloudinary(existing.photoId);
           }
@@ -155,7 +221,7 @@ const pushChanges = asyncHandler(async (req, res) => {
             existing.photoUrl = uploaded.secure_url;
             existing.photoId = uploaded.public_id;
           }
-        } else if (photo.mode === "remove") {
+        } else if (photo?.mode === "remove") {
           if (existing.photoId) {
             await deleteFromCloudinary(existing.photoId);
           }
@@ -182,6 +248,7 @@ const pushChanges = asyncHandler(async (req, res) => {
       new ApiResponse(200, { results: resultByTable }, "Sync push complete")
     );
 });
+
 
 /**
  * 🔹 PULL SYNC: Server ➜ Device

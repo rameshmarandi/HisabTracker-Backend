@@ -13,12 +13,21 @@ export const USER_ROLES = {
   CONTRACTOR: "contractor",
   USER: "user",
 };
+// export const PLAN_KEYS = {
+//   FREE: "free",
+//   MONTH_1: "month_1",
+//   MONTH_3: "month_3",
+//   YEAR_1: "year_1",
+// };
+
 export const PLAN_KEYS = {
   FREE: "free",
-  MONTH_1: "month_1",
-  MONTH_3: "month_3",
-  YEAR_1: "year_1",
+  MONTHLY: "monthly",
+  QUARTERLY: "quarterly",
+  YEARLY: "yearly",
+  LIFETIME: "lifetime",
 };
+
 export const USER_ROLE_VALUES = Object.values(USER_ROLES);
 
 export const ADMIN_ROLES = {
