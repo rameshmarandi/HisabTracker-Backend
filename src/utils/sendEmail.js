@@ -16,10 +16,10 @@ export const sendEmail = async (mailOptions) => {
       ...mailOptions,
     });
 
-    console.log("EMAIL_SENT", {
-      to: mailOptions.to,
-      messageId: info.messageId,
-    });
+    // console.log("EMAIL_SENT", {
+    //   to: mailOptions.to,
+    //   messageId: info.messageId,
+    // });
 
     return info;
   } catch (error) {

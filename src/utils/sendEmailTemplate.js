@@ -12,7 +12,7 @@ export const sendEmailTemplate = async ({
   footerMessage,
 }) => {
   const mailOptions = {
-    from: `"Hisab Tracker" <${process.env.EMAIL_USER}>`,
+    from: `"Hisab Tracker App" <${process.env.EMAIL_USER}>`,
     to: email,
     subject,
     html: `
@@ -32,7 +32,7 @@ export const sendEmailTemplate = async ({
           <!-- Header -->
           <tr>
             <td style="background:#1f2937; padding:20px; text-align:center;">
-              <h1 style="color:#ffffff; margin:0; font-size:20px;">Hisab Tracker</h1>
+              <h1 style="color:#ffffff; margin:0; font-size:20px;">Hisab Tracker App</h1>
             </td>
           </tr>
 
@@ -92,7 +92,7 @@ export const sendEmailTemplate = async ({
           <!-- Footer -->
           <tr>
             <td style="background:#f9fafb; padding:16px; text-align:center; font-size:12px; color:#9ca3af;">
-              ${footerMessage || "© " + new Date().getFullYear() + " Hisab Tracker. All rights reserved."}
+              ${footerMessage || "© " + new Date().getFullYear() + " Hisab Tracker App. All rights reserved."}
             </td>
           </tr>
 
