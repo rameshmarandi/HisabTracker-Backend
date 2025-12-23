@@ -386,7 +386,8 @@ export const registerUserService = async ({
 
   if (trialEnabled) {
     const premiumPlan = await SubscriptionPlan.findOne({
-      planKey: PLAN_KEYS.YEARLY,
+      planKey: PLAN_KEYS.QUARTERLY,
+      // planKey: PLAN_KEYS.YEARLY,
       isActive: true,
     }).populate("features.featureId");
 
