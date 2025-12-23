@@ -130,6 +130,10 @@ const UserSchema = new mongoose.Schema(
       enum: ["active", "blocked", "deleted"],
       default: "active",
     },
+    emailVerified: { type: Boolean, default: false },
+    emailVerifiedAt: { type: Date, default: null },
+    passwordResetToken: { type: String, default: null, select: false },
+    passwordResetExpiresAt: { type: Number, default: null },
 
     firebaseToken: { type: String }, // For notifications
   },

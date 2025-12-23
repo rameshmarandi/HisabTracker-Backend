@@ -16,6 +16,11 @@ import {
   removeDevice,
   refreshAccessToken,
   getUserSubscriptionStatus,
+  verifyEmailOtpController,
+  resendEmailOtpController,
+  verifyForgotPasswordOtpController,
+  forgotPasswordController,
+  resetPasswordController,
 } from "../../../controllers/User/Auth/user.controller.js";
 import { validateRequest } from "../../../middlewares/validation.middleware.js";
 import {
@@ -52,6 +57,32 @@ router.post(
   validateRequest(loginSchema),
   // loginRateLimiter,
   circuitBreakerMiddleware(loginUser)
+);
+
+// Forgot password
+router.post(
+  "/verifyForgotPasswordOtp",
+  circuitBreakerMiddleware(verifyForgotPasswordOtpController)
+);
+router.post(
+  "/forgotPassword",
+  circuitBreakerMiddleware(forgotPasswordController)
+);
+router.post(
+  "/resetPassword",
+  circuitBreakerMiddleware(resetPasswordController)
+);
+
+// verifyForgotPasswordOtpController,
+// forgotPasswordController,
+// resetPasswordController,
+
+// Email opt verification
+router.post("/verifyOTP", circuitBreakerMiddleware(verifyEmailOtpController));
+router.post(
+  "/emailVerificationResendOTPRequest",
+
+  circuitBreakerMiddleware(resendEmailOtpController)
 );
 router.post(
   "/removeDevice",

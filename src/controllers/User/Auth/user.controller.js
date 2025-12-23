@@ -9,7 +9,11 @@ import jwt from "jsonwebtoken";
 import { decryptToken, encryptToken } from "../../../utils/TokenCrypto.js";
 import { formatSubscriptionResponse } from "../../../services/authService/subscriptionFormatter.js";
 import { mapUserResponse } from "../../../services/authService/responseMapper.js";
-
+import {
+  sendEmailOTP,
+  verifyEmailOTP,
+} from "../../../services/authService/emailOtp.service.js";
+import crypto from "crypto";
 // -------------------------------------------------------------
 // HELPER — Refresh Premium if Expired
 // -------------------------------------------------------------
@@ -76,6 +80,207 @@ const registerUser = asyncHandler(async (req, res) => {
   );
 });
 
+// forgot password controller
+
+const forgotPasswordController = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, null, "If the email exists, OTP has been sent")
+      );
+  }
+
+  const user = await User.findOne({ email });
+
+  if (user) {
+    await sendEmailOTP({
+      email: user.email,
+      purpose: "FORGOT_PASSWORD",
+      userName: user.username,
+    });
+  }
+
+  // Do NOT reveal whether user exists
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "If the email exists, OTP has been sent"));
+});
+
+const verifyForgotPasswordOtpController = asyncHandler(async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    throw new ApiError(400, "Email and OTP are required");
+  }
+
+  // 1️⃣ Verify OTP
+  await verifyEmailOTP({
+    email,
+    otp,
+    purpose: "FORGOT_PASSWORD",
+  });
+
+  const user = await User.findOne({ email });
+  if (!user) throw new ApiError(404, "User not found");
+
+  // 2️⃣ Generate short-lived reset token
+  const resetToken = crypto.randomBytes(32).toString("hex");
+  const resetTokenHash = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+
+  user.passwordResetToken = resetTokenHash;
+  user.passwordResetExpiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  await user.save();
+
+  // 3️⃣ Return token to frontend
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        resetToken,
+      },
+      "OTP verified. You can reset your password"
+    )
+  );
+});
+const resetPasswordController = asyncHandler(async (req, res) => {
+  const { resetToken, newPassword } = req.body;
+
+  if (!resetToken || !newPassword) {
+    throw new ApiError(400, "Reset token and new password required");
+  }
+
+  const resetTokenHash = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+
+  const user = await User.findOne({
+    passwordResetToken: resetTokenHash,
+    passwordResetExpiresAt: { $gt: Date.now() },
+  }).select("+password");
+
+  if (!user) {
+    throw new ApiError(400, "Invalid or expired reset token");
+  }
+
+  // 1️⃣ Update password
+  user.password = newPassword;
+
+  // 2️⃣ Clear reset token
+  user.passwordResetToken = null;
+  user.passwordResetExpiresAt = null;
+
+  await user.save();
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Password reset successfully"));
+});
+
+// Email verification Controller
+const verifyEmailOtpController = asyncHandler(async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    throw new ApiError(400, "Email and OTP are required");
+  }
+
+  // 1️⃣ Verify OTP
+  await verifyEmailOTP({
+    email,
+    otp,
+    purpose: "EMAIL_VERIFY",
+  });
+
+  // 2️⃣ Fetch user
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // 3️⃣ Already verified guard
+  if (user.emailVerified) {
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { isEmailVerified: true },
+          "Email already verified"
+        )
+      );
+  }
+
+  // 4️⃣ Mark verified
+  user.emailVerified = true;
+  user.emailVerifiedAt = new Date();
+  await user.save();
+
+  // 5️⃣ Respond
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { isEmailVerified: true },
+        "Email verified successfully"
+      )
+    );
+});
+const resendEmailOtpController = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    throw new ApiError(400, "Email is required");
+  }
+
+  // 1️⃣ Find user
+  const user = await User.findOne({ email });
+  if (!user) {
+    // Do NOT reveal user existence details
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          null,
+          "If the email exists, a verification OTP has been sent"
+        )
+      );
+  }
+
+  // 2️⃣ Already verified
+  if (user.emailVerified) {
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { isEmailVerified: true },
+          "Email already verified"
+        )
+      );
+  }
+
+  // 3️⃣ Send OTP
+  await sendEmailOTP({
+    email: user.email,
+    purpose: "EMAIL_VERIFY",
+    userName: user.username,
+  });
+
+  // 4️⃣ Respond
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Verification OTP resent successfully"));
+});
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password, deviceId } = req.body;
 
@@ -211,89 +416,6 @@ const removeDevice = asyncHandler(async (req, res) => {
 // -------------------------------------------------------------
 // UPDATE DEVICE INFO (firebaseToken, deviceName, technical data)
 // -------------------------------------------------------------
-// const updateDeviceInfo = asyncHandler(async (req, res) => {
-//   /**
-//    * NOTES:
-//    * - Called AFTER login
-//    * - Updates firebase token for push notifications
-//    * - Stores deviceName (shown in UI)
-//    * - Updates platform, OS version, build number, model, etc.
-//    * - Does NOT perform device limit validation
-//    */
-
-//   const userId = req.user._id;
-
-//   const { firebaseToken, deviceName, deviceInfo = {} } = req.body;
-
-//   console.log("updateInf_body", req.body);
-
-//   const user = await User.findById(userId);
-//   if (!user) throw new ApiError(404, "User not found");
-
-//   if (firebaseToken) user.firebaseToken = firebaseToken;
-
-//   if (deviceName && deviceInfo.deviceId) {
-//     const idx = user.devices.findIndex(
-//       (d) => d.deviceId === deviceInfo.deviceId
-//     );
-//     if (idx !== -1) user.devices[idx].deviceName = deviceName;
-//   }
-
-//   user.deviceInfo = {
-//     ...user.deviceInfo,
-//     ...deviceInfo,
-//   };
-
-//   await user.save();
-
-//   return res
-//     .status(200)
-//     .json(new ApiResponse(200, { user }, "Device info updated successfully"));
-// });
-
-// const updateDeviceInfo = asyncHandler(async (req, res) => {
-//   const userId = req.user._id;
-
-//   const { firebaseToken, deviceName, deviceInfo = {} } = req.body;
-
-//   if (!deviceInfo.deviceId) {
-//     throw new ApiError(400, "Device ID missing");
-//   }
-
-//   const user = await User.findById(userId);
-//   if (!user) throw new ApiError(404, "User not found");
-
-//   // Update Firebase Token if provided
-//   if (firebaseToken !== undefined) {
-//     user.firebaseToken = firebaseToken;
-//   }
-
-//   const deviceId = deviceInfo.deviceId;
-//   const idx = user.devices.findIndex((d) => d.deviceId === deviceId);
-
-//   const devicePayload = {
-//     ...deviceInfo,
-//     deviceName: deviceName || deviceInfo.deviceName || "Unknown Device",
-//     lastActive: Date.now(),
-//   };
-
-//   if (idx !== -1) {
-//     // Update existing device
-//     user.devices[idx] = {
-//       ...user.devices[idx]._doc,
-//       ...devicePayload,
-//     };
-//   } else {
-//     // Add new device
-//     user.devices.push(devicePayload);
-//   }
-
-//   await user.save();
-
-//   return res
-//     .status(200)
-//     .json(new ApiResponse(200, { user }, "Device info updated successfully"));
-// });
 
 const updateDeviceInfo = asyncHandler(async (req, res) => {
   const userId = req.user._id;
@@ -496,4 +618,12 @@ export {
   removeDevice,
   refreshAccessToken,
   getUserSubscriptionStatus,
+  // Email verification
+  verifyEmailOtpController,
+  resendEmailOtpController,
+
+  // Forgot password
+  verifyForgotPasswordOtpController,
+  forgotPasswordController,
+  resetPasswordController,
 };

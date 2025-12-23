@@ -1,35 +1,29 @@
 import nodemailer from "nodemailer";
-
 import { ApiError } from "./ApiError.js";
 
-// Helper function to send OTP via email
-const sendEmail = async (email, mailOptions) => {
-  // OTP Secret Key
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS, // APP PASSWORD
+  },
+});
 
+export const sendEmail = async (mailOptions) => {
   try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.HOST_NAME,
-
-      port: process.env.MAIL_PORT,
-      secure: process.env.IS_SECURE,
-      requireTLS: process.env.REQUIRETLS,
-      auth: {
-        user: process.env.EMAIL_USER, // Your email credentials
-        pass: process.env.EMAIL_PASS,
-      },
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      ...mailOptions,
     });
 
-    const res = await transporter.sendMail(mailOptions);
+    console.log("EMAIL_SENT", {
+      to: mailOptions.to,
+      messageId: info.messageId,
+    });
 
-    return res;
+    return info;
   } catch (error) {
-    throw new ApiError(
-      500,
-      error.message || "Something went wrong while sending OTP via email"
-    );
+    console.error("EMAIL_SEND_FAILED", error);
+    throw new ApiError(500, "Email service failed. Please try again later.");
   }
 };
-
-
-
-export { sendEmail };
