@@ -94,7 +94,7 @@ const createSubscriptionPlan = asyncHandler(async (req, res) => {
  * 🔹 Get All Plans
  */
 const getAllSubscriptionPlans = asyncHandler(async (req, res) => {
-  const plans = await SubscriptionPlan.find()
+  const plans = await SubscriptionPlan.find({ isActive: true })
     .populate("features.featureId")
     .sort({ order: 1 });
 
@@ -112,18 +112,20 @@ const getAllSubscriptionPlans = asyncHandler(async (req, res) => {
     isActive: plan.isActive,
     order: plan.order,
     features: plan.features.map((f) => ({
-      featureId: f.featureId._id,
+      featureId: f.featureId?._id,
       featureKey: f.featureKey,
-      name: f.featureId.name,
-      description: f.featureId.description,
-      valueType: f.featureId.valueType,
+      name: f.featureId?.name,
+      description: f.featureId?.description,
+      valueType: f.featureId?.valueType,
       value: f.value,
     })),
   }));
 
   return res
     .status(200)
-    .json(new ApiResponse(200, formattedPlans, "Plans fetched successfully"));
+    .json(
+      new ApiResponse(200, formattedPlans, "Active plans fetched successfully")
+    );
 });
 
 /**

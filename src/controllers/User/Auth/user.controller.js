@@ -79,6 +79,8 @@ const registerUser = asyncHandler(async (req, res) => {
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password, deviceId } = req.body;
 
+  console.log("login_body", req.body);
+
   if (!email || !password || !deviceId) {
     throw new ApiError(400, "Email, password & deviceId are required");
   }
@@ -124,8 +126,9 @@ const getUserSubscriptionStatus = asyncHandler(async (req, res) => {
   if (!userId) throw new ApiError(401, "Unauthorized");
 
   const user = await User.findById(userId).select(
-    "currentSubscription wallet.balance"
+    "currentSubscription wallet.balance devices"
   );
+
   if (!user) throw new ApiError(404, "User not found");
 
   const subResponse = formatSubscriptionResponse(
@@ -133,9 +136,23 @@ const getUserSubscriptionStatus = asyncHandler(async (req, res) => {
     user.wallet?.balance || 0
   );
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, subResponse, "Subscription status fetched"));
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        subscription: subResponse,
+        devices: user.devices || [],
+        deviceStats: {
+          totalDevices: user.devices?.length || 0,
+          maxAllowed: user.currentSubscription?.maxDevicesAllowed || 1,
+          remaining:
+            (user.currentSubscription?.maxDevicesAllowed || 1) -
+            (user.devices?.length || 0),
+        },
+      },
+      "Subscription status fetched"
+    )
+  );
 });
 
 // -------------------------------------------------------------

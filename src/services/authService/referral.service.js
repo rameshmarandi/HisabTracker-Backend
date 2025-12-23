@@ -1,44 +1,99 @@
+import mongoose from "mongoose";
+import { v4 as uuidv4 } from "uuid";
+
 import { BusinessSetting } from "../../models/Admin/BusinessSetting/businessSetting.model.js";
 import { WalletTransactionHistory } from "../../models/User/TransactionsHistory/walletTransactionHistory.model.js";
 
+/**
+ * Apply referral rewards ONCE and atomically
+ */
 export const applyReferralRewards = async ({
   newUser,
   referrerUser,
   referralCode,
 }) => {
+  // Basic guards
+  if (!newUser) return;
   if (!referrerUser) return;
 
-  let settings = await BusinessSetting.findOne();
-  if (!settings) settings = await BusinessSetting.create({});
+  // Prevent self referral
+  if (String(newUser._id) === String(referrerUser._id)) return;
 
-  if (!settings.referralSystemEnabled) return;
+  // Prevent duplicate reward
+  if (newUser.referral?.rewarded === true) return;
 
-  const newAmount = settings.referralNewUserReward ?? 0;
-  const existingAmount = settings.referralExistingUserReward ?? 0;
+  // Load business settings (do not auto-create in production)
+  const settings = await BusinessSetting.findOne().lean();
+  if (!settings || settings.referralSystemEnabled !== true) return;
 
-  // New User
-  newUser.wallet.balance += newAmount;
-  newUser.wallet.totalEarnedCash += newAmount;
+  const newUserAmount = Number(settings.referralNewUserReward || 0);
+  const referrerAmount = Number(settings.referralExistingUserReward || 0);
 
-  await WalletTransactionHistory.create({
-    user: newUser._id,
-    amount: newAmount,
-    type: "CREDIT",
-    source: "REFERRAL_NEW_USER",
-    note: `Used referral code: ${referralCode}`,
-  });
+  // Nothing to credit
+  if (newUserAmount <= 0 && referrerAmount <= 0) return;
 
-  // Referrer
-  referrerUser.wallet.balance += existingAmount;
-  referrerUser.wallet.totalEarnedCash += existingAmount;
+  const session = await mongoose.startSession();
 
-  await WalletTransactionHistory.create({
-    user: referrerUser._id,
-    amount: existingAmount,
-    type: "CREDIT",
-    source: "REFERRAL_EXISTING_USER",
-    note: `${newUser.username} used your referral code`,
-  });
+  try {
+    session.startTransaction();
 
-  await referrerUser.save();
+    const rewardRef = uuidv4();
+
+    // Credit new user
+    if (newUserAmount > 0) {
+      newUser.wallet.balance += newUserAmount;
+      newUser.wallet.totalEarnedCash += newUserAmount;
+
+      await WalletTransactionHistory.create(
+        [
+          {
+            user: newUser._id,
+            amount: newUserAmount,
+            type: "CREDIT",
+            source: "REFERRAL_NEW_USER",
+            referenceId: `REF_NEW_${rewardRef}`,
+            note: `Referral code used: ${referralCode}`,
+          },
+        ],
+        { session }
+      );
+    }
+
+    // Credit referrer
+    if (referrerAmount > 0) {
+      referrerUser.wallet.balance += referrerAmount;
+      referrerUser.wallet.totalEarnedCash += referrerAmount;
+
+      await WalletTransactionHistory.create(
+        [
+          {
+            user: referrerUser._id,
+            amount: referrerAmount,
+            type: "CREDIT",
+            source: "REFERRAL_EXISTING_USER",
+            referenceId: `REF_EXIST_${rewardRef}`,
+            note: `${newUser.username} joined using your referral`,
+          },
+        ],
+        { session }
+      );
+    }
+
+    // Lock referral usage on new user
+    newUser.referral = {
+      codeUsed: referralCode,
+      rewarded: true,
+      rewardedAt: new Date(),
+    };
+
+    await newUser.save({ session });
+    await referrerUser.save({ session });
+
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
 };
