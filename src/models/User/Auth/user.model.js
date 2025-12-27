@@ -70,6 +70,7 @@ const subscriptionSchema = new mongoose.Schema(
         "trial", // Free trial premium
         "payment", // First time paid purchase
         "renewal", // Subscription renewal
+        "fallback",
         "referral", // Referral bonus upgrade
         "admin", // Admin manually applied
         "promo", // Special promotion / event upgrade

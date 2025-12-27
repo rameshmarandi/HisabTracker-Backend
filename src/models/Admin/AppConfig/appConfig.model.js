@@ -30,6 +30,9 @@ const forceUpdateSchema = new mongoose.Schema(
   {
     enabled: { type: Boolean, default: false },
     minVersion: { type: String, default: "1.0.0" },
+    latestVersion: { type: String, default: "1.0.0" },
+    androidUrl: { type: String },
+    iosUrl: { type: String },
     message: {
       type: String,
       default: "Please update the app to continue using.",
