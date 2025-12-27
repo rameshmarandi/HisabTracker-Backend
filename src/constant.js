@@ -1,6 +1,6 @@
 import { ENV } from "./utils/env.js";
 
-export const DB_NAME = "HisabTracker";
+export const DB_NAME = "ProductionHisabTracker";
 
 export const ENABLE_ENCRYPTION =
   ENV.NODE_ENV === "production" ? true : ENV.ENABLE_ENCRYPTION === "true";
