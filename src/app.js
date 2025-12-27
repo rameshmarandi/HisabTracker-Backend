@@ -89,7 +89,6 @@ app.use("/api/v1/admin/adConfig", adConfig);
 app.use("/api/v1/admin/setting", businessSetting);
 app.use("/api/v1/admin/subscription", subscriptionPlanRouter);
 app.use("/api/v1/admin/feature", featureRouter);
-app.use("/api/v1/admin/dashboard", dashBoardRouter);
 
 // User
 app.use("/api/v1/user", authRouter);

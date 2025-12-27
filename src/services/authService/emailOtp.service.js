@@ -63,6 +63,11 @@ export const sendEmailOTP = async ({ email, purpose, userName }) => {
 };
 
 export const verifyEmailOTP = async ({ email, otp, purpose }) => {
+  console.log("veify_OTP_handlerse", {
+    email,
+    otp,
+    purpose,
+  });
   const record = await EmailOTP.findOne({
     email,
     purpose,

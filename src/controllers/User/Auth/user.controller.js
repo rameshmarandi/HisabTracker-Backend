@@ -2,7 +2,10 @@ import { User } from "../../../models/User/Auth/user.model.js";
 import { ApiError } from "../../../utils/ApiError.js";
 import { ApiResponse } from "../../../utils/ApiResponse.js";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
-import { registerUserService } from "../../../services/authService/register.service.js";
+import {
+  registerUserService,
+  verifyEmailOtpService,
+} from "../../../services/authService/register.service.js";
 import { loginUserService } from "../../../services/authService/login.service.js";
 import { refreshPremiumStatus } from "../../../services/subscriptionService/refreshPremiumStatus.service.js";
 import jwt from "jsonwebtoken";
@@ -14,6 +17,7 @@ import {
   verifyEmailOTP,
 } from "../../../services/authService/emailOtp.service.js";
 import crypto from "crypto";
+import { generateAccessTokenAndRefreshToken } from "../../../services/authService/tokenGenerateService.js";
 // -------------------------------------------------------------
 // HELPER — Refresh Premium if Expired
 // -------------------------------------------------------------
@@ -47,37 +51,46 @@ export const sanitizeUser = (user) => {
 };
 
 const registerUser = asyncHandler(async (req, res) => {
-  const { username, email, password, deviceId, referralCode } = req.body;
+  const { username, email, password, referralCode } = req.body;
 
-  if (!username || !email || !password || !deviceId) {
-    throw new ApiError(400, "Username, email, password & deviceId required");
+  if (!username || !email || !password) {
+    throw new ApiError(400, "Username, email & password required");
   }
 
   const result = await registerUserService({
     username,
     email,
     password,
-    deviceId,
     referralCode,
   });
-
-  const sanitizedUser = sanitizeUser(result.user);
 
   return res.status(201).json(
     new ApiResponse(
       201,
       {
-        user: sanitizedUser,
-        subscription: result.subscription,
-        wallet: result.wallet,
-        accessToken: result.accessToken, // FIXED
-        refreshToken: result.refreshToken, // FIXED
+        status: result.status,
+        email: result.email,
+        userId: result.userId,
+        isRetry: result.isRetry,
       },
-      result.referrerUser
-        ? "Registered successfully. Referral applied & wallet credited."
-        : "Registered successfully"
+      result.isRetry
+        ? "Verification OTP resent to your email"
+        : "Verification OTP sent to your email"
     )
   );
+});
+const verifyEmailOtpController = asyncHandler(async (req, res) => {
+  const result = await verifyEmailOtpService(req.body);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        result,
+        "Email verified and account activated successfully"
+      )
+    );
 });
 
 // forgot password controller
@@ -85,29 +98,78 @@ const registerUser = asyncHandler(async (req, res) => {
 const forgotPasswordController = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
+  const response = new ApiResponse(
+    200,
+    {
+      message: "If the email exists, OTP has been sent",
+    },
+    "If the email exists, OTP has been sent"
+  );
+
   if (!email) {
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(200, null, "If the email exists, OTP has been sent")
-      );
+    return res.status(200).json(response);
   }
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email }).select(
+    "email username status emailVerified"
+  );
 
-  if (user) {
-    await sendEmailOTP({
-      email: user.email,
-      purpose: "FORGOT_PASSWORD",
-      userName: user.username,
-    });
+  // Only ACTIVE + VERIFIED users can request reset
+  if (user && user.status === "active" && user.emailVerified === true) {
+    try {
+      await sendEmailOTP({
+        email: user.email,
+        purpose: "FORGOT_PASSWORD",
+        userName: user.username,
+      });
+    } catch (err) {
+      // Silent failure (do not leak)
+    }
   }
 
-  // Do NOT reveal whether user exists
-  return res
-    .status(200)
-    .json(new ApiResponse(200, null, "If the email exists, OTP has been sent"));
+  return res.status(200).json(response);
 });
+
+// const verifyForgotPasswordOtpController = asyncHandler(async (req, res) => {
+//   const { email, otp } = req.body;
+
+//   if (!email || !otp) {
+//     throw new ApiError(400, "Email and OTP are required");
+//   }
+
+//   // 1️⃣ Verify OTP
+//   await verifyEmailOTP({
+//     email,
+//     otp,
+//     purpose: "FORGOT_PASSWORD",
+//   });
+
+//   const user = await User.findOne({ email });
+//   if (!user) throw new ApiError(404, "User not found");
+
+//   // 2️⃣ Generate short-lived reset token
+//   const resetToken = crypto.randomBytes(32).toString("hex");
+//   const resetTokenHash = crypto
+//     .createHash("sha256")
+//     .update(resetToken)
+//     .digest("hex");
+
+//   user.passwordResetToken = resetTokenHash;
+//   user.passwordResetExpiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+//   await user.save();
+
+//   // 3️⃣ Return token to frontend
+//   return res.status(200).json(
+//     new ApiResponse(
+//       200,
+//       {
+//         resetToken,
+//       },
+//       "OTP verified. You can reset your password"
+//     )
+//   );
+// });
 
 const verifyForgotPasswordOtpController = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
@@ -116,17 +178,24 @@ const verifyForgotPasswordOtpController = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Email and OTP are required");
   }
 
-  // 1️⃣ Verify OTP
+  // 1️⃣ OTP verification (authoritative)
   await verifyEmailOTP({
     email,
     otp,
     purpose: "FORGOT_PASSWORD",
   });
 
-  const user = await User.findOne({ email });
-  if (!user) throw new ApiError(404, "User not found");
+  // 2️⃣ Fetch user silently
+  const user = await User.findOne({ email }).select(
+    "status emailVerified passwordResetToken passwordResetExpiresAt"
+  );
 
-  // 2️⃣ Generate short-lived reset token
+  // Do NOT reveal existence or state
+  if (!user || user.status !== "active" || user.emailVerified !== true) {
+    throw new ApiError(400, "Invalid or expired OTP");
+  }
+
+  // 3️⃣ Generate reset token
   const resetToken = crypto.randomBytes(32).toString("hex");
   const resetTokenHash = crypto
     .createHash("sha256")
@@ -134,21 +203,21 @@ const verifyForgotPasswordOtpController = asyncHandler(async (req, res) => {
     .digest("hex");
 
   user.passwordResetToken = resetTokenHash;
-  user.passwordResetExpiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+  user.passwordResetExpiresAt = Date.now() + 10 * 60 * 1000;
 
-  await user.save();
+  await user.save({ validateBeforeSave: false });
 
-  // 3️⃣ Return token to frontend
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      {
-        resetToken,
-      },
-      "OTP verified. You can reset your password"
-    )
-  );
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { resetToken },
+        "OTP verified. You can reset your password"
+      )
+    );
 });
+
 const resetPasswordController = asyncHandler(async (req, res) => {
   const { resetToken, newPassword } = req.body;
 
@@ -185,55 +254,7 @@ const resetPasswordController = asyncHandler(async (req, res) => {
 });
 
 // Email verification Controller
-const verifyEmailOtpController = asyncHandler(async (req, res) => {
-  const { email, otp } = req.body;
 
-  if (!email || !otp) {
-    throw new ApiError(400, "Email and OTP are required");
-  }
-
-  // 1️⃣ Verify OTP
-  await verifyEmailOTP({
-    email,
-    otp,
-    purpose: "EMAIL_VERIFY",
-  });
-
-  // 2️⃣ Fetch user
-  const user = await User.findOne({ email });
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
-
-  // 3️⃣ Already verified guard
-  if (user.emailVerified) {
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          { isEmailVerified: true },
-          "Email already verified"
-        )
-      );
-  }
-
-  // 4️⃣ Mark verified
-  user.emailVerified = true;
-  user.emailVerifiedAt = new Date();
-  await user.save();
-
-  // 5️⃣ Respond
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        { isEmailVerified: true },
-        "Email verified successfully"
-      )
-    );
-});
 const resendEmailOtpController = asyncHandler(async (req, res) => {
   const { email } = req.body;
 

@@ -78,7 +78,10 @@ router.post(
 // resetPasswordController,
 
 // Email opt verification
-router.post("/verifyOTP", circuitBreakerMiddleware(verifyEmailOtpController));
+router.post(
+  "/verifyRegistrationOTP",
+  circuitBreakerMiddleware(verifyEmailOtpController)
+);
 router.post(
   "/emailVerificationResendOTPRequest",
 

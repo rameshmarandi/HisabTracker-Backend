@@ -1,86 +1,310 @@
-import moment from "moment";
+// services/authService/registerAndVerify.service.js
+
 import { PLAN_KEYS } from "../../constant.js";
 import { AppConfig } from "../../models/Admin/AppConfig/appConfig.model.js";
 import { SubscriptionPlan } from "../../models/Admin/Subscription/subscriptionPlan.model.js";
 import { User } from "../../models/User/Auth/user.model.js";
 import { ApiError } from "../../utils/ApiError.js";
+
 import { sendSlackAlert } from "../slackService.js";
-import { sendEmailOTP } from "./emailOtp.service.js";
+import { sendEmailOTP, verifyEmailOTP } from "./emailOtp.service.js";
 import { applyReferralRewards } from "./referral.service.js";
-import { formatSubscriptionResponse } from "./subscriptionFormatter.js";
 import { generateAccessTokenAndRefreshToken } from "./tokenGenerateService.js";
+import { formatSubscriptionResponse } from "./subscriptionFormatter.js";
+
+/* ------------------------------------------------------------------ */
+/* 🔐 FALLBACK CONFIG CACHE                                            */
+/* ------------------------------------------------------------------ */
 
 let cachedAppConfig = null;
 
-const loadFallbackConfig = async () => {
+const getAppConfig = async () => {
   if (!cachedAppConfig) {
     cachedAppConfig = await AppConfig.findOne({ key: "default" }).lean();
-    if (!cachedAppConfig) {
-      sendSlackAlert({
-        event: "APP_CONFIG_MISSING_FOR_SIGNUP",
-        message: "No default AppConfig found!",
-        severity: "CRITICAL",
-      });
-    }
   }
   return cachedAppConfig;
 };
+
+/* ------------------------------------------------------------------ */
+/* 🟢 PHASE 1 — REGISTRATION (OTP ONLY, NO RESOURCE USE)               */
+/* ------------------------------------------------------------------ */
+// export const registerUserService = async ({
+//   username,
+//   email,
+//   password,
+//   referralCode,
+// }) => {
+
+//   let user = await User.findOne({ email });
+
+//   // 1️⃣ Existing unverified user → resend OTP
+//   if (user && !user.emailVerified) {
+//     await sendEmailOTP({
+//       email: user.email,
+//       purpose: "EMAIL_VERIFY",
+//       userName: user.username,
+//       trigger: "RETRY_REGISTRATION",
+//     });
+
+//     return {
+//       status: "OTP_SENT",
+//       email: user.email,
+//       userId: user._id,
+//       isRetry: true,
+//     };
+//   }
+
+//   // 2️⃣ Existing verified user → block
+//   if (user && user.emailVerified) {
+//     throw new ApiError(409, "Account already exists. Please login.");
+//   }
+
+//   // 3️⃣ Referral validation (STRICT)
+//   let referrerUser = null;
+
+//   console.log("REgetting_referral_before", referralCode);
+//   if (referralCode) {
+//     referrerUser = await User.findOne({ referralCode });
+//     console.log("REgetting_referral_after", referralCode);
+//     if (!referrerUser) {
+//       // ❌ BREAK FLOW
+//       throw new ApiError(
+//         400,
+//         "Invalid referral code. Please check or remove it to continue."
+//       );
+//     }
+//   }
+
+//   // 4️⃣ Create pending user (only if referral valid or not provided)
+//   user = await User.create({
+//     username,
+//     email,
+//     password,
+//     referredBy: referrerUser?._id || null,
+//     emailVerified: false,
+//     emailVerifiedAt: null,
+//     status: "pending",
+//   });
+
+//   // 5️⃣ Send OTP
+//   await sendEmailOTP({
+//     email: user.email,
+//     purpose: "EMAIL_VERIFY",
+//     userName: user.username,
+//     trigger: "REGISTRATION",
+//   });
+
+//   sendSlackAlert({
+//     event: "USER_PENDING_VERIFICATION",
+//     severity: "INFO",
+//     message: "User registered, awaiting email verification",
+//     metadata: {
+//       email: user.email,
+//       referralProvided: Boolean(referralCode),
+//     },
+//   });
+
+//   return {
+//     status: "OTP_SENT",
+//     email: user.email,
+//     userId: user._id,
+//     isRetry: false,
+//   };
+// };
 
 export const registerUserService = async ({
   username,
   email,
   password,
-  deviceId,
   referralCode,
 }) => {
-  // 1️⃣ Check existing user
-  const existing = await User.findOne({ email });
-  if (existing) throw new ApiError(409, "User already registered");
+  console.log("[REGISTER] Initiated", {
+    email,
+    referralProvided: Boolean(referralCode),
+  });
 
-  // 2️⃣ Referral resolution
-  let referrerUser = null;
-  if (referralCode) {
-    referrerUser = await User.findOne({ referralCode });
-    if (!referrerUser) throw new ApiError(400, "Invalid referral code");
+  let user = await User.findOne({ email });
+
+  // 1️⃣ Existing unverified user → resend OTP
+  if (user && !user.emailVerified) {
+    console.log("[REGISTER] Existing unverified user found", {
+      email,
+      userId: user._id.toString(),
+    });
+
+    await sendEmailOTP({
+      email: user.email,
+      purpose: "EMAIL_VERIFY",
+      userName: user.username,
+      trigger: "RETRY_REGISTRATION",
+    });
+
+    console.log("[REGISTER] OTP resent for unverified user", { email });
+
+    return {
+      status: "OTP_SENT",
+      email: user.email,
+      userId: user._id,
+      isRetry: true,
+    };
   }
 
-  // 3️⃣ Create user (email NOT verified yet)
-  let user = await User.create({
+  // 2️⃣ Existing verified user → block
+  if (user && user.emailVerified) {
+    console.warn("[REGISTER] Attempt to re-register verified user", {
+      email,
+      userId: user._id.toString(),
+    });
+
+    throw new ApiError(409, "Account already exists. Please login.");
+  }
+
+  // 3️⃣ Referral validation (STRICT)
+  let referrerUser = null;
+
+  if (referralCode) {
+    console.log("[REGISTER] Referral code provided", {
+      email,
+      referralCode,
+    });
+
+    referrerUser = await User.findOne({ referralCode });
+
+    if (!referrerUser) {
+      console.warn("[REGISTER] Invalid referral code", {
+        email,
+        referralCode,
+      });
+
+      throw new ApiError(
+        400,
+        "Invalid referral code. Please check or remove it to continue."
+      );
+    }
+
+    console.log("[REGISTER] Valid referral code", {
+      email,
+      referrerUserId: referrerUser._id.toString(),
+    });
+  }
+
+  // 4️⃣ Create pending user
+  console.log("[REGISTER] Creating pending user", { email });
+
+  user = await User.create({
     username,
     email,
     password,
     referredBy: referrerUser?._id || null,
-    devices: [{ deviceId }],
     emailVerified: false,
     emailVerifiedAt: null,
+    status: "pending",
   });
 
-  // 4️⃣ Apply referral rewards (unchanged)
-  await applyReferralRewards({ newUser: user, referrerUser, referralCode });
+  console.log("[REGISTER] Pending user created", {
+    email,
+    userId: user._id.toString(),
+  });
 
-  // 5️⃣ Trial or Free Subscription (UNCHANGED)
-  let sub = null;
-  const appConfig = await AppConfig.findOne({});
+  // 5️⃣ Send OTP
+  await sendEmailOTP({
+    email: user.email,
+    purpose: "EMAIL_VERIFY",
+    userName: user.username,
+    trigger: "REGISTRATION",
+  });
+
+  console.log("[REGISTER] OTP sent for new registration", { email });
+
+  sendSlackAlert({
+    event: "USER_PENDING_VERIFICATION",
+    severity: "INFO",
+    message: "User registered, awaiting email verification",
+    metadata: {
+      email: user.email,
+      referralProvided: Boolean(referralCode),
+    },
+  });
+
+  return {
+    status: "OTP_SENT",
+    email: user.email,
+    userId: user._id,
+    isRetry: false,
+  };
+};
+
+/* ------------------------------------------------------------------ */
+/* 🔵 PHASE 2 — EMAIL OTP VERIFY + ACCOUNT ACTIVATION                  */
+/* ------------------------------------------------------------------ */
+
+export const verifyEmailOtpService = async ({
+  email,
+  otp,
+  deviceId,
+  deviceName = "Unknown Device",
+}) => {
+  if (!email || !otp || !deviceId) {
+    throw new ApiError(400, "Email, OTP and deviceId are required");
+  }
+
+  // 1️⃣ Verify OTP
+  await verifyEmailOTP({
+    email,
+    otp,
+    purpose: "EMAIL_VERIFY",
+  });
+
+  // 2️⃣ Fetch user
+  const user = await User.findOne({ email });
+  if (!user) throw new ApiError(404, "User not found");
+
+  // 3️⃣ Eligibility guard
+  if (user.status !== "pending") {
+    throw new ApiError(403, "Account is not eligible for verification");
+  }
+
+  // 4️⃣ Activate user
+  user.emailVerified = true;
+  user.emailVerifiedAt = new Date();
+  user.status = "active";
+
+  /* -------------------------------------------------- */
+  /* 🎁 APPLY REFERRAL (SAFE NOW)                        */
+  /* -------------------------------------------------- */
+  if (user.referredBy) {
+    await applyReferralRewards({
+      newUser: user,
+      referrerUserId: user.referredBy,
+      source: "signup",
+    });
+  }
+
+  /* -------------------------------------------------- */
+  /* 📦 ASSIGN SUBSCRIPTION (WITH FALLBACK)              */
+  /* -------------------------------------------------- */
+  let subscription = null;
+  const appConfig = await getAppConfig();
 
   const trialEnabled = appConfig?.trialConfig?.isTrialEnabled ?? false;
   const trialDays = appConfig?.trialConfig?.trialDurationDays ?? 0;
 
   if (trialEnabled) {
-    const premiumPlan = await SubscriptionPlan.findOne({
+    const trialPlan = await SubscriptionPlan.findOne({
       planKey: PLAN_KEYS.QUARTERLY,
       isActive: true,
     }).populate("features.featureId");
 
-    if (premiumPlan) {
+    if (trialPlan) {
       const features = {};
-      premiumPlan.features.forEach((f) => {
+      trialPlan.features.forEach((f) => {
         features[f.featureKey] = f.value;
       });
 
-      sub = {
-        planId: premiumPlan._id,
-        planKey: premiumPlan.planKey,
-        planName: premiumPlan.name,
+      subscription = {
+        planId: trialPlan._id,
+        planKey: trialPlan.planKey,
+        planName: trialPlan.name,
         isPremium: true,
         features,
         maxDevicesAllowed: features["multipledevices"] || 1,
@@ -91,7 +315,7 @@ export const registerUserService = async ({
     }
   }
 
-  if (!sub) {
+  if (!subscription) {
     const freePlan = await SubscriptionPlan.findOne({
       planKey: PLAN_KEYS.FREE,
       isActive: true,
@@ -103,7 +327,7 @@ export const registerUserService = async ({
         features[f.featureKey] = f.value;
       });
 
-      sub = {
+      subscription = {
         planId: freePlan._id,
         planKey: PLAN_KEYS.FREE,
         planName: freePlan.name,
@@ -114,63 +338,72 @@ export const registerUserService = async ({
         expiresAt: null,
         source: "signup",
       };
-    } else {
-      const config = await loadFallbackConfig();
-      sub = {
-        planId: null,
-        planKey: "free-fallback",
-        planName: PLAN_KEYS.FREE,
-        isPremium: false,
-        features: config?.freeUserLimits || {},
-        maxDevicesAllowed: config?.freeUserLimits?.maxDevices ?? 1,
-        startedAt: Date.now(),
-        expiresAt: null,
-        source: "signup",
-      };
     }
   }
 
-  user.currentSubscription = sub;
-  await user.save();
+  // 🔐 Fallback (LAST RESORT)
+  if (!subscription) {
+    sendSlackAlert({
+      event: "APP_CONFIG_FALLBACK_USED",
+      severity: "CRITICAL",
+      message: "Fallback subscription applied during activation",
+      metadata: { email },
+    });
 
-  // 6️⃣ Tokens (UNCHANGED)
+    subscription = {
+      planId: null,
+      planKey: "free-fallback",
+      planName: PLAN_KEYS.FREE,
+      isPremium: false,
+      features: appConfig?.freeUserLimits || {},
+      maxDevicesAllowed: appConfig?.freeUserLimits?.maxDevices ?? 1,
+      startedAt: Date.now(),
+      expiresAt: null,
+      source: "fallback",
+    };
+  }
+
+  user.currentSubscription = subscription;
+
+  /* -------------------------------------------------- */
+  /* 📱 DEVICE + TOKENS                                 */
+  /* -------------------------------------------------- */
   const { accessToken, refreshToken } =
     await generateAccessTokenAndRefreshToken(user._id);
 
-  user.devices[0].refreshToken = refreshToken;
-  await user.save();
-  // 🔔 SLACK ALERT (NON-BLOCKING)
-  sendSlackAlert({
-    event: "USER_REGISTERED",
-    severity: "INFO",
-    message: "New user registered",
-    metadata: {
-      email: user.email,
-      username: user.username,
-      source: user.currentSubscription?.source,
-      referral: referralCode || "none",
-      trial: user.currentSubscription?.source === "trial",
-    },
-  });
+  const existingDevice = user.devices.find((d) => d.deviceId === deviceId);
 
-  // 7️⃣ Send EMAIL VERIFICATION OTP (NEW)
-  try {
-    await sendEmailOTP({
-      email: user.email,
-      purpose: "EMAIL_VERIFY",
-      userName: user.username,
-    });
-  } catch (err) {
-    // Do NOT break signup if email fails
-    sendSlackAlert({
-      event: "EMAIL_VERIFICATION_OTP_FAILED",
-      message: err.message,
-      userId: user._id.toString(),
-      severity: "HIGH",
+  if (existingDevice) {
+    existingDevice.lastActive = Date.now();
+    existingDevice.refreshToken = refreshToken;
+  } else {
+    if (user.devices.length >= subscription.maxDevicesAllowed) {
+      throw new ApiError(403, "Device limit exceeded");
+    }
+
+    user.devices.push({
+      deviceId,
+      deviceName,
+      lastActive: Date.now(),
+      refreshToken,
     });
   }
 
-  // 8️⃣ Final response (explicit verification flag)
+  await user.save();
+
+  sendSlackAlert({
+    event: "USER_ACTIVATED",
+    severity: "INFO",
+    message: "User account activated successfully",
+    metadata: {
+      email,
+      source: subscription.source,
+    },
+  });
+
+  /* -------------------------------------------------- */
+  /* 🎯 FINAL RESPONSE                                  */
+  /* -------------------------------------------------- */
   return {
     user,
     subscription: formatSubscriptionResponse(
@@ -183,7 +416,6 @@ export const registerUserService = async ({
     },
     accessToken,
     refreshToken,
-    isEmailVerified: user.emailVerified,
-    referrerUser,
+    isEmailVerified: true,
   };
 };

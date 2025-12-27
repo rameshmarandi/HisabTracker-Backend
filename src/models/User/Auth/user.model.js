@@ -127,8 +127,8 @@ const UserSchema = new mongoose.Schema(
     // ACCOUNT
     status: {
       type: String,
-      enum: ["active", "blocked", "deleted"],
-      default: "active",
+      enum: ["pending", "active", "blocked", "deleted"],
+      default: "pending",
     },
     emailVerified: { type: Boolean, default: false },
     emailVerifiedAt: { type: Date, default: null },
