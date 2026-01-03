@@ -12,9 +12,19 @@ export const applyReferralRewards = async ({
   referrerUser,
   referralCode,
 }) => {
+  console.log("apply_refearil", {
+    newUser,
+    referrerUser,
+    referralCode,
+  });
   // Basic guards
-  if (!newUser) return;
-  if (!referrerUser) return;
+  if (!newUser || !referrerUser) {
+    console.warn("Referral skipped due to missing user", {
+      newUser: !!newUser,
+      referrerUser: !!referrerUser,
+    });
+    return;
+  }
 
   // Prevent self referral
   if (String(newUser._id) === String(referrerUser._id)) return;
