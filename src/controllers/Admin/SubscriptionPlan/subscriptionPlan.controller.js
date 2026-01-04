@@ -6,39 +6,61 @@ import { ApiResponse } from "../../../utils/ApiResponse.js";
 import { asyncHandler } from "../../../utils/asyncHandler.js";
 
 /**
- * 🔹 Helper – Price Calculation
+ * 🔹 Price Calculation
  */
-const calculateFinalPrice = (base, discount) => {
-  const discountedAmount = (base * (discount || 0)) / 100;
-  return base - discountedAmount;
+const calculateFinalPrice = (basePrice, discountPercent = 0) => {
+  if (discountPercent < 0 || discountPercent > 100) {
+    throw new ApiError(400, "Invalid discount percent");
+  }
+
+  const discounted = basePrice - (basePrice * discountPercent) / 100;
+  return Math.round(discounted);
 };
 
 /**
- * 🔹 Helper – Validate & Auto-map Feature Keys
+ * 🔹 Validate & Prepare Plan Features
+ * Only plan-controlled features are allowed here
  */
-const validateAndPrepareFeatures = async (features) => {
-  if (!features || !Array.isArray(features)) return [];
+const validateAndPrepareFeatures = async (features = []) => {
+  if (!Array.isArray(features)) return [];
 
-  const ids = features.map((f) => f.featureId);
-  const dbFeatures = await Feature.find({ _id: { $in: ids }, isActive: true });
+  const featureKeys = features.map((f) => f.featureKey);
+
+  const dbFeatures = await Feature.find({
+    key: { $in: featureKeys },
+    isActive: true,
+  });
 
   if (dbFeatures.length !== features.length) {
     throw new ApiError(400, "Invalid or inactive feature included");
   }
 
-  dbFeatures.forEach((ft) => {
-    const inputFeature = features.find((x) => x.featureId == ft._id.toString());
+  return features.map((input) => {
+    const feature = dbFeatures.find((f) => f.key === input.featureKey);
 
-    if (ft.valueType === "boolean" && typeof inputFeature.value !== "boolean")
-      throw new ApiError(400, `${ft.name} requires Boolean value`);
+    // ❌ Block core features
+    if (feature.defaultValue === true) {
+      throw new ApiError(
+        400,
+        `${feature.name} is a core feature and cannot be overridden`
+      );
+    }
 
-    if (ft.valueType === "number" && typeof inputFeature.value !== "number")
-      throw new ApiError(400, `${ft.name} requires Numeric value`);
+    // 🔍 Type validation
+    if (feature.valueType === "boolean" && typeof input.value !== "boolean") {
+      throw new ApiError(400, `${feature.name} requires boolean value`);
+    }
 
-    inputFeature.featureKey = ft.key;
+    if (feature.valueType === "number" && typeof input.value !== "number") {
+      throw new ApiError(400, `${feature.name} requires numeric value`);
+    }
+
+    return {
+      featureId: feature._id,
+      featureKey: feature.key,
+      value: input.value,
+    };
   });
-
-  return features;
 };
 
 /**
@@ -60,13 +82,22 @@ const createSubscriptionPlan = asyncHandler(async (req, res) => {
 
   if (!name) throw new ApiError(400, "Name is required");
   if (!planKey) throw new ApiError(400, "planKey is required");
-  if (durationInDays === undefined || durationInDays === null)
+  if (durationInDays === undefined)
     throw new ApiError(400, "Duration is required");
-  if (basePrice === undefined || basePrice === null)
-    throw new ApiError(400, "Base Price is required");
+  if (basePrice === undefined)
+    throw new ApiError(400, "Base price is required");
 
-  const planExists = await SubscriptionPlan.findOne({ name });
-  if (planExists) throw new ApiError(409, "Plan name already exists");
+  if (hasExpiry && durationInDays <= 0) {
+    throw new ApiError(400, "Expiring plans must have valid duration");
+  }
+
+  const existingPlan = await SubscriptionPlan.findOne({
+    $or: [{ name }, { planKey }],
+  });
+
+  if (existingPlan) {
+    throw new ApiError(409, "Plan name or planKey already exists");
+  }
 
   const processedFeatures = await validateAndPrepareFeatures(features);
   const finalPrice = calculateFinalPrice(basePrice, discountPercent);
@@ -87,18 +118,18 @@ const createSubscriptionPlan = asyncHandler(async (req, res) => {
 
   return res
     .status(201)
-    .json(new ApiResponse(201, plan, "Subscription Plan created"));
+    .json(new ApiResponse(201, plan, "Subscription plan created"));
 });
 
 /**
- * 🔹 Get All Plans
+ * 🔹 Get All Active Plans
  */
 const getAllSubscriptionPlans = asyncHandler(async (req, res) => {
   const plans = await SubscriptionPlan.find({ isActive: true })
     .populate("features.featureId")
     .sort({ order: 1 });
 
-  const formattedPlans = plans.map((plan) => ({
+  const formatted = plans.map((plan) => ({
     _id: plan._id,
     name: plan.name,
     planKey: plan.planKey,
@@ -109,10 +140,8 @@ const getAllSubscriptionPlans = asyncHandler(async (req, res) => {
     discountPercent: plan.discountPercent,
     finalPrice: plan.finalPrice,
     benefits: plan.benefits,
-    isActive: plan.isActive,
     order: plan.order,
     features: plan.features.map((f) => ({
-      featureId: f.featureId?._id,
       featureKey: f.featureKey,
       name: f.featureId?.name,
       description: f.featureId?.description,
@@ -123,9 +152,7 @@ const getAllSubscriptionPlans = asyncHandler(async (req, res) => {
 
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, formattedPlans, "Active plans fetched successfully")
-    );
+    .json(new ApiResponse(200, formatted, "Active plans fetched"));
 });
 
 /**
@@ -139,7 +166,7 @@ const updateSubscriptionPlan = asyncHandler(async (req, res) => {
   const plan = await SubscriptionPlan.findById(id);
   if (!plan) throw new ApiError(404, "Plan not found");
 
-  if (features !== undefined) {
+  if (features) {
     plan.features = await validateAndPrepareFeatures(features);
   }
 
@@ -152,7 +179,7 @@ const updateSubscriptionPlan = asyncHandler(async (req, res) => {
 });
 
 /**
- * Toggle Active Status
+ * 🔄 Toggle Plan Status
  */
 const toggleSubscriptionPlanStatus = asyncHandler(async (req, res) => {
   const { id } = req.body;
@@ -176,7 +203,7 @@ const toggleSubscriptionPlanStatus = asyncHandler(async (req, res) => {
 });
 
 /**
- * ❌ Permanent Delete
+ * ❌ Delete Plan Permanently
  */
 const deleteSubscriptionPlan = asyncHandler(async (req, res) => {
   const { id } = req.body;
